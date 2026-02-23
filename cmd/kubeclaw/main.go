@@ -1421,6 +1421,8 @@ type tuiModel struct {
 	editField        int    // which field is selected in the current tab
 	editMemory       editMemoryForm
 	editHeartbeat    editHeartbeatForm
+	editTaskInput    bool           // sub-modal for task text entry
+	editTaskTI       textinput.Model // text input for task sub-modal
 
 	// Feed
 	feedExpanded     bool // fullscreen feed mode
@@ -1729,6 +1731,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.showEditModal {
+			// Task sub-modal text input — intercept keys first.
+			if m.editTaskInput {
+				switch msg.Type {
+				case tea.KeyEsc:
+					m.editTaskInput = false
+					return m, nil
+				case tea.KeyEnter:
+					m.editHeartbeat.task = m.editTaskTI.Value()
+					m.editTaskInput = false
+					return m, nil
+				default:
+					m.editTaskTI, tiCmd = m.editTaskTI.Update(msg)
+					return m, tiCmd
+				}
+			}
+
 			switch msg.String() {
 			case "esc":
 				m.showEditModal = false
@@ -1812,14 +1830,34 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if len(m.editHeartbeat.schedule) > 0 {
 							m.editHeartbeat.schedule = m.editHeartbeat.schedule[:len(m.editHeartbeat.schedule)-1]
 						}
-					case 1:
-						if len(m.editHeartbeat.task) > 0 {
-							m.editHeartbeat.task = m.editHeartbeat.task[:len(m.editHeartbeat.task)-1]
-						}
 					}
 				}
 				return m, nil
 			case "enter":
+				// Toggle bools, open task sub-modal, or no-op on text fields.
+				if m.editTab == 0 {
+					if m.editField == 0 {
+						m.editMemory.enabled = !m.editMemory.enabled
+					}
+				} else {
+					switch m.editField {
+					case 1:
+						// Open task sub-modal
+						m.editTaskInput = true
+						m.editTaskTI = textinput.New()
+						m.editTaskTI.Placeholder = "Enter task description..."
+						m.editTaskTI.CharLimit = 512
+						m.editTaskTI.Width = 50
+						m.editTaskTI.SetValue(m.editHeartbeat.task)
+						m.editTaskTI.Focus()
+					case 4:
+						m.editHeartbeat.includeMemory = !m.editHeartbeat.includeMemory
+					case 5:
+						m.editHeartbeat.suspend = !m.editHeartbeat.suspend
+					}
+				}
+				return m, nil
+			case "ctrl+s":
 				// Apply changes
 				m.showEditModal = false
 				return m, m.applyEditModal()
@@ -1841,8 +1879,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						switch m.editField {
 						case 0:
 							m.editHeartbeat.schedule += ch
-						case 1:
-							m.editHeartbeat.task += ch
 						}
 					}
 				}
@@ -3509,7 +3545,7 @@ func (m tuiModel) renderInstancesTable(tableH int) string {
 func (m tuiModel) renderRunsTable(tableH int) string {
 	var b strings.Builder
 
-	header := fmt.Sprintf(" %-26s %-18s %-12s %-22s %-8s", "NAME", "INSTANCE", "PHASE", "POD", "AGE")
+	header := fmt.Sprintf(" %-26s %-18s %-12s %-14s %-18s %-8s", "NAME", "INSTANCE", "PHASE", "TRIGGER", "POD", "AGE")
 	b.WriteString(tuiColHeaderStyle.Render(padRight(header, m.width)))
 	b.WriteString("\n")
 
@@ -3517,6 +3553,11 @@ func (m tuiModel) renderRunsTable(tableH int) string {
 		b.WriteString(m.renderEmptyTable(tableH-1, "No runs — try: /run <instance> <task>"))
 		return b.String()
 	}
+
+	// Styles for trigger badges.
+	triggerHeartbeat := lipgloss.NewStyle().Foreground(lipgloss.Color("#F5C2E7")).Bold(true)
+	triggerScheduled := lipgloss.NewStyle().Foreground(lipgloss.Color("#89DCEB"))
+	triggerSweep := lipgloss.NewStyle().Foreground(lipgloss.Color("#FAB387"))
 
 	for i := 0; i < tableH-1; i++ {
 		idx := i + m.tableScroll
@@ -3535,13 +3576,32 @@ func (m tuiModel) renderRunsTable(tableH int) string {
 			phase = "Pending"
 		}
 
-		// Build row without phase (we'll colorize phase separately).
+		// Determine trigger source from labels.
+		triggerType := run.Labels["kubeclaw.io/type"]
+		triggerSched := run.Labels["kubeclaw.io/schedule"]
+		triggerText := "-"
+		if triggerType != "" {
+			switch triggerType {
+			case "heartbeat":
+				triggerText = "♥ " + triggerType
+			case "sweep":
+				triggerText = "⟳ " + triggerType
+			default:
+				triggerText = "⏱ " + triggerType
+			}
+			if triggerSched != "" {
+				triggerText += " (" + truncate(triggerSched, 8) + ")"
+			}
+		}
+
+		// Build row without phase/trigger (we'll colorize them separately).
 		nameCol := fmt.Sprintf(" %-26s %-18s ", truncate(run.Name, 26), truncate(run.Spec.InstanceRef, 18))
 		phaseCol := fmt.Sprintf("%-12s ", phase)
-		restCol := fmt.Sprintf("%-22s %-8s", truncate(pod, 22), age)
+		trigCol := fmt.Sprintf("%-14s ", truncate(triggerText, 14))
+		restCol := fmt.Sprintf("%-18s %-8s", truncate(pod, 18), age)
 
 		if idx == m.selectedRow {
-			b.WriteString(tuiRowSelectedStyle.Render(padRight(nameCol+phaseCol+restCol, m.width)))
+			b.WriteString(tuiRowSelectedStyle.Render(padRight(nameCol+phaseCol+trigCol+restCol, m.width)))
 		} else {
 			style := tuiRowStyle
 			if idx%2 == 1 {
@@ -3558,9 +3618,20 @@ func (m tuiModel) renderRunsTable(tableH int) string {
 			default:
 				phaseCol = tuiDimStyle.Render(fmt.Sprintf("%-12s ", phase))
 			}
-			b.WriteString(style.Render(nameCol) + phaseCol + style.Render(restCol))
+			// Colorize trigger.
+			switch triggerType {
+			case "heartbeat":
+				trigCol = triggerHeartbeat.Render(fmt.Sprintf("%-14s ", truncate(triggerText, 14)))
+			case "scheduled":
+				trigCol = triggerScheduled.Render(fmt.Sprintf("%-14s ", truncate(triggerText, 14)))
+			case "sweep":
+				trigCol = triggerSweep.Render(fmt.Sprintf("%-14s ", truncate(triggerText, 14)))
+			default:
+				trigCol = tuiDimStyle.Render(fmt.Sprintf("%-14s ", truncate(triggerText, 14)))
+			}
+			b.WriteString(style.Render(nameCol) + phaseCol + trigCol + style.Render(restCol))
 			// Pad remaining.
-			renderedW := lipgloss.Width(style.Render(nameCol)) + lipgloss.Width(phaseCol) + lipgloss.Width(style.Render(restCol))
+			renderedW := lipgloss.Width(style.Render(nameCol)) + lipgloss.Width(phaseCol) + lipgloss.Width(trigCol) + lipgloss.Width(style.Render(restCol))
 			if m.width > renderedW {
 				b.WriteString(style.Render(strings.Repeat(" ", m.width-renderedW)))
 			}
@@ -4362,17 +4433,34 @@ func (m tuiModel) renderEditModal(base string) string {
 	} else {
 		// Heartbeat tab
 		renderField(0, "Schedule", m.editHeartbeat.schedule)
-		renderField(1, "Task", m.editHeartbeat.task)
+		taskDisplay := m.editHeartbeat.task
+		if taskDisplay == "" {
+			taskDisplay = "(press enter to set)"
+		} else {
+			taskDisplay = truncate(taskDisplay, 40)
+		}
+		renderField(1, "Task", taskDisplay+" ⏎")
 		renderField(2, "Type", "◀ "+editScheduleTypes[m.editHeartbeat.schedType]+" ▶")
 		renderField(3, "Concurrency", "◀ "+editConcurrencyPolicies[m.editHeartbeat.concurrencyPolicy]+" ▶")
 		renderBool(4, "IncludeMemory", m.editHeartbeat.includeMemory)
 		renderBool(5, "Suspend", m.editHeartbeat.suspend)
 	}
 
-	content.WriteString("\n")
-	content.WriteString(tuiDimStyle.Render("  tab switch tabs · ↑↓ navigate · space toggle"))
-	content.WriteString("\n")
-	content.WriteString(tuiDimStyle.Render("  ←→ cycle · type to edit · enter apply · esc cancel"))
+	// Task sub-modal overlay
+	if m.editTaskInput {
+		content.WriteString("\n")
+		content.WriteString(tuiModalTitleStyle.Render("  Task Description"))
+		content.WriteString("\n")
+		tiView := m.editTaskTI.View()
+		content.WriteString("  " + tiView)
+		content.WriteString("\n")
+		content.WriteString(tuiDimStyle.Render("  enter confirm · esc cancel"))
+	} else {
+		content.WriteString("\n")
+		content.WriteString(tuiDimStyle.Render("  tab switch tabs · ↑↓ navigate · enter toggle/edit"))
+		content.WriteString("\n")
+		content.WriteString(tuiDimStyle.Render("  ←→ cycle enums · type text fields · ctrl+s apply · esc cancel"))
+	}
 
 	modal := tuiModalBorderStyle.Render(content.String())
 	lines := strings.Split(base, "\n")
