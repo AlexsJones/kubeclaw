@@ -45,14 +45,26 @@ func main() {
 		Use:   "k8sclaw",
 		Short: "K8sClaw - Kubernetes-native AI agent management",
 		Long: `K8sClaw CLI for managing ClawInstances, AgentRuns, ClawPolicies,
-SkillPacks, and feature gates in your Kubernetes cluster.`,
+SkillPacks, and feature gates in your Kubernetes cluster.
+
+Running without a subcommand launches the interactive TUI.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip K8s client init for commands that don't need it.
 			switch cmd.Name() {
-			case "version", "install", "uninstall", "onboard", "tui":
+			case "version", "install", "uninstall", "onboard", "tui", "k8sclaw":
 				return nil
 			}
 			return initClient()
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := initClient(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not connect to cluster: %v\n", err)
+				fmt.Fprintln(os.Stderr, "TUI will start in disconnected mode.")
+			}
+			m := newTUIModel(namespace)
+			p := tea.NewProgram(m, tea.WithAltScreen())
+			_, err := p.Run()
+			return err
 		},
 	}
 
