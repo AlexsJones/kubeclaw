@@ -3226,10 +3226,9 @@ func (m tuiModel) renderLog(logH int) string {
 	for i := 0; i < logH-1; i++ {
 		if i < len(visible) {
 			line := visible[i]
-			// Strip ANSI to measure, then truncate the raw string.
-			plain := stripAnsi(line)
-			if len(plain) > maxW {
-				line = line[:maxW]
+			// Truncate to fit pane while preserving ANSI styles.
+			if lipgloss.Width(line) > maxW {
+				line = ansiTruncate(line, maxW)
 			}
 			b.WriteString(" " + line)
 		}
@@ -4407,15 +4406,11 @@ func joinPanesHorizontally(left, right string, leftW, rightW int) string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		// Truncate left line if it exceeds leftW (table rows may be wider).
+		// Truncate left line if it exceeds leftW (table rows may be wider),
+		// preserving ANSI escape codes so styles (selected row, etc.) survive.
 		lw := lipgloss.Width(l)
 		if lw > leftW {
-			// Trim visible chars to leftW. Since ANSI codes make len > Width,
-			// we do a rough byte-trim and re-pad.
-			plain := stripAnsi(l)
-			if len(plain) > leftW {
-				l = plain[:leftW]
-			}
+			l = ansiTruncate(l, leftW)
 			lw = lipgloss.Width(l)
 		}
 		if lw < leftW {
@@ -4466,5 +4461,35 @@ func stripAnsi(s string) string {
 			i++
 		}
 	}
+	return out.String()
+}
+
+// ansiTruncate truncates a string to maxVisible visible characters while
+// preserving all ANSI escape sequences. This ensures styled (colored,
+// bold, background) text is not destroyed when truncating to fit a pane.
+func ansiTruncate(s string, maxVisible int) string {
+	var out strings.Builder
+	visible := 0
+	i := 0
+	for i < len(s) && visible < maxVisible {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// Copy the entire ANSI sequence through.
+			j := i + 2
+			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
+				j++
+			}
+			if j < len(s) {
+				j++ // include the terminator
+			}
+			out.WriteString(s[i:j])
+			i = j
+		} else {
+			out.WriteByte(s[i])
+			visible++
+			i++
+		}
+	}
+	// Append a reset sequence so truncated styles don't bleed.
+	out.WriteString("\x1b[0m")
 	return out.String()
 }
