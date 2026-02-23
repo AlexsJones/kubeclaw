@@ -1,17 +1,20 @@
 ---
-# Example SkillPack
+# Example SkillPack — simple code review skill bundle
 apiVersion: kubeclaw.io/v1alpha1
 kind: SkillPack
 metadata:
-  name: code-review
+  name: code-review-sample
   namespace: default
 spec:
+  category: development
+  source: sample
+  version: "0.1.0"
   skills:
     - name: review-guidelines
       description: Guidelines for performing code reviews
       content: |
         # Code Review Guidelines
-        
+
         ## Checklist
         - Check for correctness and edge cases
         - Verify error handling
@@ -19,43 +22,41 @@ spec:
         - Assess test coverage
         - Check for security vulnerabilities
         - Verify documentation
-        
+
         ## Severity Levels
         - **Critical**: Security issues, data corruption, crashes
         - **Major**: Logic errors, performance issues
         - **Minor**: Style, naming, documentation
         - **Suggestion**: Nice-to-have improvements
-      tools:
-        - read_file
-        - grep_search
-        - list_dir
+      requires:
+        tools:
+          - read_file
+          - grep_search
+          - list_dir
     - name: security-patterns
       description: Common security anti-patterns to check for
       content: |
         # Security Review Patterns
-        
+
         ## Input Validation
         - Check all user inputs are validated
         - Look for SQL injection vectors
         - Check for XSS in templates
-        
+
         ## Authentication
         - Verify auth checks on all endpoints
         - Check for hardcoded credentials
         - Verify token expiration
-        
+
         ## Data Protection
         - Check for PII logging
         - Verify encryption at rest
         - Check TLS configuration
-      tools:
-        - read_file
-        - grep_search
+      requires:
+        tools:
+          - read_file
+          - grep_search
   runtimeRequirements:
     sandbox: false
-    tools:
-      - read_file
-      - grep_search
-      - list_dir
     minMemory: 256Mi
     minCPU: 100m

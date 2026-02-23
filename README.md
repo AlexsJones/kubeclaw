@@ -94,9 +94,20 @@ graph TB
             A1["Agent Container<br/><small>LLM provider agnostic</small>"]
             IPC["IPC Bridge<br/><small>fsnotify → NATS</small>"]
             SB["Sandbox<br/><small>optional sidecar</small>"]
+            SKS["Skill Sidecars<br/><small>kubectl, helm, etc.<br/>auto-RBAC</small>"]
             A1 -. "/ipc volume" .- IPC
             A1 -. optional .- SB
+            A1 -. "/workspace" .- SKS
         end
+
+        subgraph SEC["Skill RBAC  ·  ephemeral, least-privilege"]
+            SR["Role + RoleBinding<br/><small>namespace-scoped<br/>ownerRef → AgentRun</small>"]
+            SCR["ClusterRole + Binding<br/><small>cluster-scoped<br/>label-based cleanup</small>"]
+        end
+
+        SKS -- "uses" --> SR
+        SKS -- "uses" --> SCR
+        CM -- "creates / deletes" --> SEC
 
         subgraph MEM["Persistent Memory"]
             MCM[("ConfigMap<br/><small>&lt;instance&gt;-memory</small>")]
@@ -123,6 +134,7 @@ graph TB
     style CH fill:#16213e,stroke:#0f3460,color:#fff
     style AP fill:#0f3460,stroke:#53354a,color:#fff
     style MEM fill:#1c2333,stroke:#7c3aed,color:#fff
+    style SEC fill:#1c2333,stroke:#238636,color:#fff
     style DATA fill:#161b22,stroke:#30363d,color:#c9d1d9
     style NATS fill:#e94560,stroke:#fff,color:#fff
     style USER fill:#238636,stroke:#fff,color:#fff
@@ -132,8 +144,8 @@ graph TB
 ### How It Works
 
 1. **A message arrives** via a channel pod (Telegram, Slack, etc.) and is published to the NATS event bus.
-2. **The controller creates an AgentRun CR**, which reconciles into an ephemeral K8s Job — an agent container + IPC bridge sidecar + optional sandbox.
-3. **The agent container** calls the configured LLM provider (OpenAI, Anthropic, Azure, Ollama, or any OpenAI-compatible endpoint), with skills mounted as files and persistent memory injected from a ConfigMap.
+2. **The controller creates an AgentRun CR**, which reconciles into an ephemeral K8s Job — an agent container + IPC bridge sidecar + optional sandbox + skill sidecars (with auto-provisioned RBAC).
+3. **The agent container** calls the configured LLM provider (OpenAI, Anthropic, Azure, Ollama, or any OpenAI-compatible endpoint), with skills mounted as files, persistent memory injected from a ConfigMap, and tool sidecars providing runtime capabilities like `kubectl`.
 4. **Results flow back** through the IPC bridge → NATS → channel pod → user. The controller extracts structured results and memory updates from pod logs.
 5. **Everything is a Kubernetes resource** — instances, runs, policies, skills, and schedules are all CRDs. Lifecycle is managed by controllers. Access is gated by admission webhooks. Network isolation is enforced by NetworkPolicy. The TUI gives you k9s-style visibility into the entire system.
 
@@ -146,8 +158,47 @@ KubeClaw models every agentic concept as a Kubernetes Custom Resource:
 | `ClawInstance` | Namespace / Tenant | Per-user gateway — channels, provider config, memory settings, skill bindings |
 | `AgentRun` | Job | Single agent execution — task, model, result capture, memory extraction |
 | `ClawPolicy` | NetworkPolicy | Feature and tool gating — what an agent can and cannot do |
-| `SkillPack` | ConfigMap | Portable skill bundles — mounted into agent pods as files |
+| `SkillPack` | ConfigMap | Portable skill bundles — mounted into agent pods as files, with optional sidecar containers |
 | `ClawSchedule` | CronJob | Recurring tasks — heartbeats, sweeps, scheduled runs with cron expressions |
+
+### Skill Sidecars
+
+SkillPacks can declare a **sidecar container** that is dynamically injected into the agent pod when the skill is active. The controller automatically creates scoped RBAC:
+
+```
+ClawInstance has skills: [k8s-ops]
+  → AgentRun created
+    → Controller resolves SkillPack "k8s-ops"
+      → Finds sidecar: { image: skill-k8s-ops, rbac: [...] }
+      → Injects sidecar container into pod
+      → Creates Role + RoleBinding (namespace-scoped)
+      → Creates ClusterRole + ClusterRoleBinding (read-only cluster access)
+    → Pod runs with kubectl + RBAC available
+    → On deletion: cluster-scoped RBAC cleaned up
+```
+
+The `k8s-ops` built-in skill is the first proof of concept — it provides a sidecar with `kubectl`, `curl`, and `jq` with read access to pods, deployments, nodes, and more. See the **[Skill Authoring Guide](docs/writing-skills.md)** for a full walkthrough of building your own skills. To enable a skill, toggle it on your instance:
+
+```
+# In the TUI: press 's' on an instance → Space to toggle k8s-ops
+# Or via kubectl:
+kubectl patch clawinstance <name> --type=merge -p '{"spec":{"skills":[{"skillPackRef":"k8s-ops"}]}}'
+```
+
+### Security
+
+KubeClaw enforces defence-in-depth at every layer — from network isolation to per-run RBAC:
+
+| Layer | Mechanism | Scope |
+|-------|-----------|-------|
+| **Network** | `NetworkPolicy` deny-all egress on agent pods | Only the IPC bridge can reach NATS; agents cannot reach the internet or other pods |
+| **Pod sandbox** | `SecurityContext` — `runAsNonRoot`, UID 1000, read-only root filesystem | Every agent and sidecar container runs with least privilege |
+| **Admission control** | `ClawPolicy` admission webhook | Feature and tool gates enforced before the pod is created |
+| **Skill RBAC** | Ephemeral `Role`/`ClusterRole` per AgentRun | Each skill declares exactly the API permissions it needs — the controller auto-provisions them at run start and revokes them on completion |
+| **RBAC lifecycle** | `ownerReference` (namespace) + label-based cleanup (cluster) | Namespace RBAC is garbage-collected by Kubernetes. Cluster RBAC is cleaned up by the controller on AgentRun deletion. |
+| **Multi-tenancy** | Namespaced CRDs + Kubernetes RBAC | Instances, runs, and policies are namespace-scoped; standard K8s RBAC controls who can create them |
+
+The skill sidecar RBAC model deserves special attention: permissions are **created on-demand** when an AgentRun starts, scoped to exactly the APIs the skill needs, and **deleted when the run finishes**. There is no standing god-role — each run gets its own short-lived credentials. This is the Kubernetes-native equivalent of temporary IAM session credentials.
 
 ### Persistent Memory
 
@@ -339,6 +390,7 @@ kubeclaw/
 | **Memory-as-ConfigMap** | ConfigMap | Persistent agent memory lives in etcd — no external database, no file system, fully declarative and backed up with cluster state |
 | **Schedule-as-CRD** | CronJob analogy | `ClawSchedule` resources define recurring tasks with cron expressions — the controller creates AgentRuns, not the user |
 | **Skills-as-ConfigMap** | ConfigMap volume | SkillPacks generate ConfigMaps mounted into agent pods — portable, versionable, namespace-scoped |
+| **Skill sidecars with auto-RBAC** | Role / ClusterRole | SkillPacks can declare sidecar containers with RBAC rules — the controller injects the container and provisions ephemeral, least-privilege RBAC per run |
 
 ## Configuration
 
@@ -356,7 +408,7 @@ kubeclaw/
 ## Development
 
 ```bash
-make test        # run tests (42 passing)
+make test        # run tests (46 passing)
 make lint        # run linter
 make manifests   # generate CRD manifests
 make run         # run controller locally (needs kubeconfig)

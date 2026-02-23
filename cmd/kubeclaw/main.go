@@ -1426,6 +1426,7 @@ type tuiModel struct {
 
 	// Feed
 	feedExpanded     bool // fullscreen feed mode
+	feedCollapsed    bool // hide feed side pane
 	feedInputFocused bool // typing in the feed chat
 	feedInput        textinput.Model
 }
@@ -2196,6 +2197,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f":
 			if len(m.instances) > 0 {
 				m.feedExpanded = !m.feedExpanded
+				if m.feedExpanded {
+					m.feedCollapsed = false
+				}
+			}
+			return m, nil
+		case "F":
+			m.feedCollapsed = !m.feedCollapsed
+			if m.feedCollapsed {
+				m.feedExpanded = false
 			}
 			return m, nil
 		}
@@ -3322,7 +3332,7 @@ func (m tuiModel) View() string {
 
 	// Split pane: show a conversational feed on the right when instances exist
 	// and the terminal is wide enough.
-	showFeed := len(m.instances) > 0 && m.width >= 100
+	showFeed := len(m.instances) > 0 && m.width >= 100 && !m.feedCollapsed
 	fullWidth := m.width
 	if showFeed {
 		// Left pane gets 65%, feed gets 35% (minus 1 for separator).
@@ -4275,11 +4285,11 @@ func (m tuiModel) renderStatusBar() string {
 	} else {
 		keys = []string{
 			"Tab", "next view",
-			"1-6", "views",
-			"j/k", "navigate",
+			"1-7", "views",
 			"Enter", "detail",
 			"Esc", "back",
 			"f", "feed",
+			"F", "feed toggle",
 			"l", "logs",
 			"d", "describe",
 			"R", "run",

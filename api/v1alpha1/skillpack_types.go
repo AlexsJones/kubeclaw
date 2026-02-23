@@ -10,9 +10,27 @@ type SkillPackSpec struct {
 	// Skills is the list of skills in this pack.
 	Skills []Skill `json:"skills"`
 
+	// Category classifies this skill pack (e.g. "kubernetes", "security", "devops").
+	// +optional
+	Category string `json:"category,omitempty"`
+
+	// Source records where this skill pack was imported from.
+	// +optional
+	Source string `json:"source,omitempty"`
+
+	// Version is the skill pack version.
+	// +optional
+	Version string `json:"version,omitempty"`
+
 	// RuntimeRequirements defines container image requirements for this skill pack.
 	// +optional
 	RuntimeRequirements *RuntimeRequirements `json:"runtimeRequirements,omitempty"`
+
+	// Sidecar defines a container that is injected into the agent pod when this
+	// SkillPack is active. The sidecar provides tools (kubectl, helm, etc.) and
+	// the controller creates scoped RBAC automatically.
+	// +optional
+	Sidecar *SkillSidecar `json:"sidecar,omitempty"`
 }
 
 // Skill defines a single skill entry.
@@ -36,12 +54,94 @@ type Skill struct {
 type SkillRequirements struct {
 	// Bins lists required binaries.
 	Bins []string `json:"bins,omitempty"`
+
+	// Tools lists tools this skill expects the agent to have.
+	Tools []string `json:"tools,omitempty"`
 }
 
 // RuntimeRequirements defines container-level requirements.
 type RuntimeRequirements struct {
 	// Image is the container image that satisfies these requirements.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// Sandbox indicates whether this skill requires a sandbox.
+	// +optional
+	Sandbox bool `json:"sandbox,omitempty"`
+
+	// MinMemory is the minimum memory requirement (e.g. "256Mi").
+	// +optional
+	MinMemory string `json:"minMemory,omitempty"`
+
+	// MinCPU is the minimum CPU requirement (e.g. "100m").
+	// +optional
+	MinCPU string `json:"minCPU,omitempty"`
+}
+
+// SkillSidecar defines a sidecar container that is injected into the agent pod
+// when this SkillPack is active. The sidecar runs alongside the agent and
+// provides tools (e.g. kubectl, helm) that the agent executes via the shared
+// workspace/IPC volumes.
+type SkillSidecar struct {
+	// Image is the container image for this skill sidecar.
 	Image string `json:"image"`
+
+	// Command overrides the container entrypoint.
+	// Defaults to ["sleep", "infinity"] to keep the sidecar alive.
+	// +optional
+	Command []string `json:"command,omitempty"`
+
+	// Env is a list of environment variables for the sidecar.
+	// +optional
+	Env []EnvVar `json:"env,omitempty"`
+
+	// MountWorkspace controls whether /workspace is mounted into the sidecar.
+	// +kubebuilder:default=true
+	// +optional
+	MountWorkspace bool `json:"mountWorkspace,omitempty"`
+
+	// Resources for the sidecar container.
+	// +optional
+	Resources *SidecarResources `json:"resources,omitempty"`
+
+	// RBAC defines Kubernetes RBAC rules that this sidecar needs.
+	// The controller creates a Role + RoleBinding scoped to the run namespace.
+	// +optional
+	RBAC []RBACRule `json:"rbac,omitempty"`
+
+	// ClusterRBAC defines cluster-scoped RBAC rules (ClusterRole + ClusterRoleBinding).
+	// Use for read-only cluster-wide access (e.g. listing nodes, namespaces).
+	// +optional
+	ClusterRBAC []RBACRule `json:"clusterRBAC,omitempty"`
+}
+
+// EnvVar is a simplified environment variable (name + value).
+type EnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// SidecarResources defines resource requests and limits for a skill sidecar.
+type SidecarResources struct {
+	// CPU request (e.g. "100m").
+	// +optional
+	CPU string `json:"cpu,omitempty"`
+
+	// Memory request (e.g. "128Mi").
+	// +optional
+	Memory string `json:"memory,omitempty"`
+}
+
+// RBACRule defines a single Kubernetes RBAC policy rule.
+type RBACRule struct {
+	// APIGroups is the list of API groups (e.g. "", "apps", "batch").
+	APIGroups []string `json:"apiGroups"`
+
+	// Resources is the list of resources (e.g. "pods", "deployments").
+	Resources []string `json:"resources"`
+
+	// Verbs is the list of allowed verbs (e.g. "get", "list", "watch").
+	Verbs []string `json:"verbs"`
 }
 
 // SkillPackStatus defines the observed state of SkillPack.

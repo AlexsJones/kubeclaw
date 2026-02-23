@@ -798,6 +798,11 @@ func (in *SkillPackSpec) DeepCopyInto(out *SkillPackSpec) {
 		*out = new(RuntimeRequirements)
 		**out = **in
 	}
+	if in.Sidecar != nil {
+		in, out := &in.Sidecar, &out.Sidecar
+		*out = new(SkillSidecar)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 func (in *SkillPackSpec) DeepCopy() *SkillPackSpec {
@@ -854,6 +859,11 @@ func (in *SkillRequirements) DeepCopyInto(out *SkillRequirements) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Tools != nil {
+		in, out := &in.Tools, &out.Tools
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 }
 
 func (in *SkillRequirements) DeepCopy() *SkillRequirements {
@@ -874,6 +884,102 @@ func (in *RuntimeRequirements) DeepCopy() *RuntimeRequirements {
 		return nil
 	}
 	out := new(RuntimeRequirements)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SkillSidecar) DeepCopyInto(out *SkillSidecar) {
+	*out = *in
+	if in.Command != nil {
+		in, out := &in.Command, &out.Command
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Env != nil {
+		in, out := &in.Env, &out.Env
+		*out = make([]EnvVar, len(*in))
+		copy(*out, *in)
+	}
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = new(SidecarResources)
+		**out = **in
+	}
+	if in.RBAC != nil {
+		in, out := &in.RBAC, &out.RBAC
+		*out = make([]RBACRule, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.ClusterRBAC != nil {
+		in, out := &in.ClusterRBAC, &out.ClusterRBAC
+		*out = make([]RBACRule, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *SkillSidecar) DeepCopy() *SkillSidecar {
+	if in == nil {
+		return nil
+	}
+	out := new(SkillSidecar)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *EnvVar) DeepCopyInto(out *EnvVar) {
+	*out = *in
+}
+
+func (in *EnvVar) DeepCopy() *EnvVar {
+	if in == nil {
+		return nil
+	}
+	out := new(EnvVar)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *SidecarResources) DeepCopyInto(out *SidecarResources) {
+	*out = *in
+}
+
+func (in *SidecarResources) DeepCopy() *SidecarResources {
+	if in == nil {
+		return nil
+	}
+	out := new(SidecarResources)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RBACRule) DeepCopyInto(out *RBACRule) {
+	*out = *in
+	if in.APIGroups != nil {
+		in, out := &in.APIGroups, &out.APIGroups
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Verbs != nil {
+		in, out := &in.Verbs, &out.Verbs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+func (in *RBACRule) DeepCopy() *RBACRule {
+	if in == nil {
+		return nil
+	}
+	out := new(RBACRule)
 	in.DeepCopyInto(out)
 	return out
 }

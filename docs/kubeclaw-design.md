@@ -365,8 +365,35 @@ spec:
 
 ### 3.4 `SkillPack` — portable skill bundles
 
-Skills are currently Markdown files on disk. In KubeClaw they become a CRD that
-produces ConfigMaps mounted into agent pods.
+Skills are Markdown instruction bundles that become a CRD. The SkillPack
+controller reconciles each SkillPack into a ConfigMap that is projected into
+agent pods at `/skills`.
+
+**Sidecar architecture:** When a SkillPack requires runtime tools (e.g. `kubectl`,
+`helm`), it declares a `sidecar` spec. The AgentRun controller dynamically injects
+the sidecar container into the agent pod and creates scoped RBAC resources
+(Role/RoleBinding for namespace-scoped access, ClusterRole/ClusterRoleBinding for
+cluster-wide read access). RBAC resources are garbage-collected when the AgentRun
+is deleted.
+
+```
+┌─────────────────────────────────────────────────┐
+│  Agent Pod (Job)                                │
+│                                                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │  agent   │  │ipc-bridge│  │skill-k8s-ops │  │
+│  │ (runner) │  │ (sidecar)│  │  (sidecar)   │  │
+│  └────┬─────┘  └────┬─────┘  └──────┬───────┘  │
+│       │              │               │          │
+│   /workspace     /ipc            kubectl +      │
+│   /skills        NATS            RBAC access    │
+│   /ipc                                          │
+│                                                 │
+│  ServiceAccount: kubeclaw-agent                 │
+│  + Role: kubeclaw-skill-k8s-ops-<run>           │
+│  + ClusterRole: kubeclaw-skill-k8s-ops-<run>    │
+└─────────────────────────────────────────────────┘
+```
 
 ```yaml
 apiVersion: kubeclaw.io/v1alpha1
@@ -392,7 +419,22 @@ spec:
         ...
   # Container image requirements (bins this skill pack needs)
   runtimeRequirements:
-    image: ghcr.io/openclaw/sandbox-common:latest  # not the minimal image
+    image: ghcr.io/openclaw/sandbox-common:latest
+  # Optional sidecar container for runtime tools + auto-RBAC
+  sidecar:
+    image: ghcr.io/alexsjones/kubeclaw/skill-k8s-ops:latest
+    mountWorkspace: true
+    resources:
+      cpu: "100m"
+      memory: "128Mi"
+    rbac:
+      - apiGroups: [""]
+        resources: ["pods", "services"]
+        verbs: ["get", "list", "watch"]
+    clusterRBAC:
+      - apiGroups: [""]
+        resources: ["nodes", "namespaces"]
+        verbs: ["get", "list", "watch"]
 ```
 
 ---
@@ -414,6 +456,8 @@ AgentRun created (status.phase = Pending)
   ├─ Resolve pod spec:
   │   ├─ Base image (sandbox image from ClawInstance)
   │   ├─ Sidecar containers (sandbox exec, browser if featureGate enabled)
+  │   ├─ Skill sidecars (from SkillPack.spec.sidecar, e.g. kubectl)
+  │   ├─ Skill RBAC (Role/ClusterRole + bindings, scoped per-run)
   │   ├─ Volumes (workspace PVC, skills ConfigMaps, session ephemeral vol)
   │   ├─ SecurityContext (from ClawPolicy.sandbox)
   │   ├─ NetworkPolicy (from ClawPolicy.sandbox.network)

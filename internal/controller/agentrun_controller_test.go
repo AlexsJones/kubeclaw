@@ -37,7 +37,7 @@ func newTestRun() *kubeclawv1alpha1.AgentRun {
 func TestBuildJob_BasicMetadata(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	job := r.buildJob(run, false)
+	job := r.buildJob(run, false, nil)
 
 	if job.Name != "test-run" {
 		t.Errorf("name = %q, want test-run", job.Name)
@@ -50,7 +50,7 @@ func TestBuildJob_BasicMetadata(t *testing.T) {
 func TestBuildJob_Labels(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	job := r.buildJob(run, false)
+	job := r.buildJob(run, false, nil)
 
 	labels := job.Spec.Template.Labels
 	if labels["kubeclaw.io/instance"] != "my-instance" {
@@ -66,7 +66,7 @@ func TestBuildJob_Labels(t *testing.T) {
 
 func TestBuildJob_TTLAndBackoff(t *testing.T) {
 	r := &AgentRunReconciler{}
-	job := r.buildJob(newTestRun(), false)
+	job := r.buildJob(newTestRun(), false, nil)
 
 	if job.Spec.TTLSecondsAfterFinished == nil || *job.Spec.TTLSecondsAfterFinished != 300 {
 		t.Error("TTL should be 300")
@@ -78,7 +78,7 @@ func TestBuildJob_TTLAndBackoff(t *testing.T) {
 
 func TestBuildJob_DeadlineDefault(t *testing.T) {
 	r := &AgentRunReconciler{}
-	job := r.buildJob(newTestRun(), false)
+	job := r.buildJob(newTestRun(), false, nil)
 
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 600 {
 		t.Errorf("deadline = %v, want 600", job.Spec.ActiveDeadlineSeconds)
@@ -89,7 +89,7 @@ func TestBuildJob_DeadlineWithTimeout(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
 	run.Spec.Timeout = &metav1.Duration{Duration: 5 * time.Minute}
-	job := r.buildJob(run, false)
+	job := r.buildJob(run, false, nil)
 
 	// 5min = 300s + 60 = 360
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 360 {
@@ -99,7 +99,7 @@ func TestBuildJob_DeadlineWithTimeout(t *testing.T) {
 
 func TestBuildJob_ServiceAccount(t *testing.T) {
 	r := &AgentRunReconciler{}
-	job := r.buildJob(newTestRun(), false)
+	job := r.buildJob(newTestRun(), false, nil)
 
 	if job.Spec.Template.Spec.ServiceAccountName != "kubeclaw-agent" {
 		t.Errorf("SA = %q, want kubeclaw-agent", job.Spec.Template.Spec.ServiceAccountName)
@@ -108,7 +108,7 @@ func TestBuildJob_ServiceAccount(t *testing.T) {
 
 func TestBuildJob_PodSecurityContext(t *testing.T) {
 	r := &AgentRunReconciler{}
-	job := r.buildJob(newTestRun(), false)
+	job := r.buildJob(newTestRun(), false, nil)
 
 	psc := job.Spec.Template.Spec.SecurityContext
 	if psc == nil {
@@ -124,7 +124,7 @@ func TestBuildJob_PodSecurityContext(t *testing.T) {
 
 func TestBuildJob_RestartPolicy(t *testing.T) {
 	r := &AgentRunReconciler{}
-	job := r.buildJob(newTestRun(), false)
+	job := r.buildJob(newTestRun(), false, nil)
 
 	if job.Spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
 		t.Errorf("restart = %q, want Never", job.Spec.Template.Spec.RestartPolicy)
@@ -135,7 +135,7 @@ func TestBuildJob_RestartPolicy(t *testing.T) {
 
 func TestBuildContainers_BasicCount(t *testing.T) {
 	r := &AgentRunReconciler{}
-	cs := r.buildContainers(newTestRun(), false)
+	cs := r.buildContainers(newTestRun(), false, nil)
 	// agent + ipc-bridge = 2
 	if len(cs) != 2 {
 		t.Fatalf("container count = %d, want 2", len(cs))
@@ -144,7 +144,7 @@ func TestBuildContainers_BasicCount(t *testing.T) {
 
 func TestBuildContainers_AgentImage(t *testing.T) {
 	r := &AgentRunReconciler{}
-	cs := r.buildContainers(newTestRun(), false)
+	cs := r.buildContainers(newTestRun(), false, nil)
 	// agent container should reference agent-runner image
 	if cs[0].Name != "agent" {
 		t.Fatalf("first container name = %q, want agent", cs[0].Name)
@@ -156,7 +156,7 @@ func TestBuildContainers_AgentImage(t *testing.T) {
 
 func TestBuildContainers_IPCBridgeImage(t *testing.T) {
 	r := &AgentRunReconciler{}
-	cs := r.buildContainers(newTestRun(), false)
+	cs := r.buildContainers(newTestRun(), false, nil)
 	if cs[1].Name != "ipc-bridge" {
 		t.Fatalf("second container name = %q, want ipc-bridge", cs[1].Name)
 	}
@@ -168,7 +168,7 @@ func TestBuildContainers_IPCBridgeImage(t *testing.T) {
 func TestBuildContainers_AgentEnvVars(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 
 	envMap := map[string]string{}
 	for _, e := range cs[0].Env {
@@ -188,7 +188,7 @@ func TestBuildContainers_AgentEnvVars(t *testing.T) {
 func TestBuildContainers_AuthSecretRef(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 
 	if len(cs[0].EnvFrom) == 0 {
 		t.Fatal("expected envFrom for auth secret")
@@ -202,7 +202,7 @@ func TestBuildContainers_NoAuthSecretRef(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
 	run.Spec.Model.AuthSecretRef = ""
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 
 	if len(cs[0].EnvFrom) != 0 {
 		t.Errorf("envFrom should be empty for no-auth providers, got %d", len(cs[0].EnvFrom))
@@ -211,7 +211,7 @@ func TestBuildContainers_NoAuthSecretRef(t *testing.T) {
 
 func TestBuildContainers_AgentSecurityContext(t *testing.T) {
 	r := &AgentRunReconciler{}
-	cs := r.buildContainers(newTestRun(), false)
+	cs := r.buildContainers(newTestRun(), false, nil)
 
 	sc := cs[0].SecurityContext
 	if sc == nil {
@@ -224,7 +224,7 @@ func TestBuildContainers_AgentSecurityContext(t *testing.T) {
 
 func TestBuildContainers_AgentVolumeMounts(t *testing.T) {
 	r := &AgentRunReconciler{}
-	cs := r.buildContainers(newTestRun(), false)
+	cs := r.buildContainers(newTestRun(), false, nil)
 
 	mounts := map[string]bool{}
 	for _, m := range cs[0].VolumeMounts {
@@ -239,7 +239,7 @@ func TestBuildContainers_AgentVolumeMounts(t *testing.T) {
 
 func TestBuildContainers_AgentResources(t *testing.T) {
 	r := &AgentRunReconciler{}
-	cs := r.buildContainers(newTestRun(), false)
+	cs := r.buildContainers(newTestRun(), false, nil)
 
 	req := cs[0].Resources.Requests
 	if req.Cpu().Cmp(resource.MustParse("250m")) != 0 {
@@ -253,7 +253,7 @@ func TestBuildContainers_AgentResources(t *testing.T) {
 func TestBuildContainers_IPCBridgeEnvVars(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 
 	envMap := map[string]string{}
 	for _, e := range cs[1].Env {
@@ -271,7 +271,7 @@ func TestBuildContainers_WithSandbox(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
 	run.Spec.Sandbox = &kubeclawv1alpha1.AgentRunSandboxSpec{Enabled: true}
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 	// agent + ipc-bridge + sandbox = 3
 	if len(cs) != 3 {
 		t.Fatalf("container count = %d, want 3", len(cs))
@@ -288,7 +288,7 @@ func TestBuildContainers_SandboxCustomImage(t *testing.T) {
 		Enabled: true,
 		Image:   "my-sandbox:v1",
 	}
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 	if cs[2].Image != "my-sandbox:v1" {
 		t.Errorf("sandbox image = %q, want my-sandbox:v1", cs[2].Image)
 	}
@@ -298,7 +298,7 @@ func TestBuildContainers_SandboxDisabled(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
 	run.Spec.Sandbox = &kubeclawv1alpha1.AgentRunSandboxSpec{Enabled: false}
-	cs := r.buildContainers(run, false)
+	cs := r.buildContainers(run, false, nil)
 	if len(cs) != 2 {
 		t.Errorf("container count = %d, want 2 (sandbox disabled)", len(cs))
 	}
@@ -411,7 +411,7 @@ func TestBuildVolumes_MemoryDisabled(t *testing.T) {
 func TestBuildContainers_MemoryMount(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	cs := r.buildContainers(run, true)
+	cs := r.buildContainers(run, true, nil)
 
 	agent := cs[0]
 	var hasMount bool
@@ -434,5 +434,102 @@ func TestBuildContainers_MemoryMount(t *testing.T) {
 	}
 	if !hasEnv {
 		t.Error("agent container should have MEMORY_ENABLED=true env when memoryEnabled=true")
+	}
+}
+
+// ── Skill sidecar injection tests ────────────────────────────────────────────
+
+func TestBuildContainers_SkillSidecarInjected(t *testing.T) {
+	r := &AgentRunReconciler{}
+	sidecars := []resolvedSidecar{
+		{
+			skillPackName: "k8s-ops",
+			sidecar: kubeclawv1alpha1.SkillSidecar{
+				Image:          "ghcr.io/alexsjones/kubeclaw/skill-k8s-ops:latest",
+				MountWorkspace: true,
+				Resources: &kubeclawv1alpha1.SidecarResources{
+					CPU:    "100m",
+					Memory: "128Mi",
+				},
+			},
+		},
+	}
+	cs := r.buildContainers(newTestRun(), false, sidecars)
+	// agent + ipc-bridge + skill sidecar = 3
+	if len(cs) != 3 {
+		t.Fatalf("container count = %d, want 3", len(cs))
+	}
+	sc := cs[2]
+	if sc.Name != "skill-k8s-ops" {
+		t.Errorf("sidecar name = %q, want skill-k8s-ops", sc.Name)
+	}
+	if sc.Image != "ghcr.io/alexsjones/kubeclaw/skill-k8s-ops:latest" {
+		t.Errorf("sidecar image = %q", sc.Image)
+	}
+	// Should have workspace mount
+	var hasWorkspace bool
+	for _, m := range sc.VolumeMounts {
+		if m.MountPath == "/workspace" {
+			hasWorkspace = true
+			break
+		}
+	}
+	if !hasWorkspace {
+		t.Error("sidecar should mount /workspace when MountWorkspace=true")
+	}
+}
+
+func TestBuildContainers_SkillSidecarDefaultCommand(t *testing.T) {
+	r := &AgentRunReconciler{}
+	sidecars := []resolvedSidecar{
+		{
+			skillPackName: "test-skill",
+			sidecar: kubeclawv1alpha1.SkillSidecar{
+				Image:          "test:latest",
+				MountWorkspace: false,
+			},
+		},
+	}
+	cs := r.buildContainers(newTestRun(), false, sidecars)
+	sc := cs[2]
+	if len(sc.Command) != 2 || sc.Command[0] != "sleep" || sc.Command[1] != "infinity" {
+		t.Errorf("sidecar command = %v, want [sleep infinity]", sc.Command)
+	}
+	// Should NOT have workspace mount
+	for _, m := range sc.VolumeMounts {
+		if m.MountPath == "/workspace" {
+			t.Error("sidecar should NOT mount /workspace when MountWorkspace=false")
+		}
+	}
+}
+
+func TestBuildContainers_MultipleSkillSidecars(t *testing.T) {
+	r := &AgentRunReconciler{}
+	sidecars := []resolvedSidecar{
+		{skillPackName: "skill-a", sidecar: kubeclawv1alpha1.SkillSidecar{Image: "a:latest", MountWorkspace: true}},
+		{skillPackName: "skill-b", sidecar: kubeclawv1alpha1.SkillSidecar{Image: "b:latest", MountWorkspace: true}},
+	}
+	cs := r.buildContainers(newTestRun(), false, sidecars)
+	// agent + ipc-bridge + 2 sidecars = 4
+	if len(cs) != 4 {
+		t.Fatalf("container count = %d, want 4", len(cs))
+	}
+	if cs[2].Name != "skill-skill-a" {
+		t.Errorf("first sidecar name = %q", cs[2].Name)
+	}
+	if cs[3].Name != "skill-skill-b" {
+		t.Errorf("second sidecar name = %q", cs[3].Name)
+	}
+}
+
+func TestBuildJob_WithSkillSidecars(t *testing.T) {
+	r := &AgentRunReconciler{}
+	sidecars := []resolvedSidecar{
+		{skillPackName: "k8s-ops", sidecar: kubeclawv1alpha1.SkillSidecar{Image: "k8s:latest", MountWorkspace: true}},
+	}
+	job := r.buildJob(newTestRun(), false, sidecars)
+	containers := job.Spec.Template.Spec.Containers
+	if len(containers) != 3 {
+		t.Fatalf("job container count = %d, want 3", len(containers))
 	}
 }

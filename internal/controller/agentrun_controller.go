@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -116,8 +117,16 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 		}
 	}
 
+	// Resolve skill sidecars from SkillPack CRDs.
+	sidecars := r.resolveSkillSidecars(ctx, log, agentRun)
+
+	// Create RBAC resources for skill sidecars that need them.
+	if err := r.ensureSkillRBAC(ctx, log, agentRun, sidecars); err != nil {
+		log.Error(err, "Failed to create skill RBAC, continuing without")
+	}
+
 	// Build and create the Job
-	job := r.buildJob(agentRun, memoryEnabled)
+	job := r.buildJob(agentRun, memoryEnabled, sidecars)
 	if err := controllerutil.SetControllerReference(agentRun, job, r.Scheme); err != nil {
 		return ctrl.Result{}, fmt.Errorf("setting owner reference: %w", err)
 	}
@@ -212,6 +221,9 @@ func (r *AgentRunReconciler) reconcileCompleted(ctx context.Context, log logr.Lo
 // reconcileDelete handles AgentRun deletion.
 func (r *AgentRunReconciler) reconcileDelete(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (ctrl.Result, error) {
 	log.Info("Reconciling AgentRun deletion")
+
+	// Clean up cluster-scoped RBAC resources created for skill sidecars.
+	r.cleanupSkillRBAC(ctx, log, agentRun)
 
 	// Delete the Job if it exists
 	if agentRun.Status.JobName != "" {
@@ -314,7 +326,7 @@ func (r *AgentRunReconciler) ensureAgentServiceAccount(ctx context.Context, name
 }
 
 // buildJob constructs the Kubernetes Job for an AgentRun.
-func (r *AgentRunReconciler) buildJob(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool) *batchv1.Job {
+func (r *AgentRunReconciler) buildJob(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool, sidecars []resolvedSidecar) *batchv1.Job {
 	labels := map[string]string{
 		"kubeclaw.io/agent-run": agentRun.Name,
 		"kubeclaw.io/instance":  agentRun.Spec.InstanceRef,
@@ -329,7 +341,7 @@ func (r *AgentRunReconciler) buildJob(agentRun *kubeclawv1alpha1.AgentRun, memor
 	backoffLimit := int32(0)
 
 	// Build containers
-	containers := r.buildContainers(agentRun, memoryEnabled)
+	containers := r.buildContainers(agentRun, memoryEnabled, sidecars)
 	volumes := r.buildVolumes(agentRun, memoryEnabled)
 
 	runAsNonRoot := true
@@ -367,7 +379,7 @@ func (r *AgentRunReconciler) buildJob(agentRun *kubeclawv1alpha1.AgentRun, memor
 }
 
 // buildContainers constructs the container list for an agent pod.
-func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool) []corev1.Container {
+func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool, sidecars []resolvedSidecar) []corev1.Container {
 	readOnly := true
 	noPrivEsc := false
 
@@ -491,6 +503,57 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 				Limits: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("500m"),
 					corev1.ResourceMemory: resource.MustParse("512Mi"),
+				},
+			},
+		})
+	}
+
+	// Inject skill sidecar containers.
+	for _, sc := range sidecars {
+		cmd := sc.sidecar.Command
+		if len(cmd) == 0 {
+			cmd = []string{"sleep", "infinity"}
+		}
+
+		var envVars []corev1.EnvVar
+		for _, e := range sc.sidecar.Env {
+			envVars = append(envVars, corev1.EnvVar{Name: e.Name, Value: e.Value})
+		}
+
+		mounts := []corev1.VolumeMount{
+			{Name: "ipc", MountPath: "/ipc"},
+			{Name: "tmp", MountPath: "/tmp"},
+		}
+		if sc.sidecar.MountWorkspace {
+			mounts = append(mounts, corev1.VolumeMount{Name: "workspace", MountPath: "/workspace"})
+		}
+
+		cpuReq := "100m"
+		memReq := "128Mi"
+		if sc.sidecar.Resources != nil {
+			if sc.sidecar.Resources.CPU != "" {
+				cpuReq = sc.sidecar.Resources.CPU
+			}
+			if sc.sidecar.Resources.Memory != "" {
+				memReq = sc.sidecar.Resources.Memory
+			}
+		}
+
+		containers = append(containers, corev1.Container{
+			Name:            fmt.Sprintf("skill-%s", sc.skillPackName),
+			Image:           sc.sidecar.Image,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         cmd,
+			Env:             envVars,
+			VolumeMounts:    mounts,
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse(cpuReq),
+					corev1.ResourceMemory: resource.MustParse(memReq),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse(cpuReq),
+					corev1.ResourceMemory: resource.MustParse(memReq),
 				},
 			},
 		})
@@ -766,6 +829,208 @@ func (r *AgentRunReconciler) failRun(ctx context.Context, agentRun *kubeclawv1al
 	agentRun.Status.CompletedAt = &now
 	agentRun.Status.Error = reason
 	return r.Status().Update(ctx, agentRun)
+}
+
+// --- Skill sidecar resolution and RBAC ---
+
+// resolvedSidecar pairs a SkillPack name with its sidecar spec.
+type resolvedSidecar struct {
+	skillPackName string
+	sidecar       kubeclawv1alpha1.SkillSidecar
+}
+
+// resolveSkillSidecars looks up SkillPack CRDs for the AgentRun's active
+// skills and returns any that have a sidecar defined.
+func (r *AgentRunReconciler) resolveSkillSidecars(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) []resolvedSidecar {
+	var sidecars []resolvedSidecar
+	for _, ref := range agentRun.Spec.Skills {
+		if ref.SkillPackRef == "" {
+			continue
+		}
+		// The SkillPackRef on the AgentRun may be the ConfigMap name produced by
+		// the SkillPack controller (e.g. "skillpack-k8s-ops"). Try to resolve
+		// the SkillPack CRD by stripping the "skillpack-" prefix first.
+		spName := ref.SkillPackRef
+		if strings.HasPrefix(spName, "skillpack-") {
+			spName = strings.TrimPrefix(spName, "skillpack-")
+		}
+
+		sp := &kubeclawv1alpha1.SkillPack{}
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: agentRun.Namespace,
+			Name:      spName,
+		}, sp); err != nil {
+			// Try cluster-scoped (no namespace) as SkillPacks can live anywhere.
+			if err2 := r.Get(ctx, client.ObjectKey{Name: spName}, sp); err2 != nil {
+				log.V(1).Info("SkillPack not found, skipping sidecar", "name", spName)
+				continue
+			}
+		}
+
+		if sp.Spec.Sidecar != nil && sp.Spec.Sidecar.Image != "" {
+			sidecars = append(sidecars, resolvedSidecar{
+				skillPackName: spName,
+				sidecar:       *sp.Spec.Sidecar,
+			})
+		}
+	}
+	return sidecars
+}
+
+// ensureSkillRBAC creates Role/ClusterRole and bindings for skill sidecars.
+// Resources are labelled with the AgentRun name for cleanup.
+func (r *AgentRunReconciler) ensureSkillRBAC(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun, sidecars []resolvedSidecar) error {
+	for _, sc := range sidecars {
+		// Namespace-scoped Role + RoleBinding
+		if len(sc.sidecar.RBAC) > 0 {
+			roleName := fmt.Sprintf("kubeclaw-skill-%s-%s", sc.skillPackName, agentRun.Name)
+			var rules []rbacv1.PolicyRule
+			for _, rule := range sc.sidecar.RBAC {
+				rules = append(rules, rbacv1.PolicyRule{
+					APIGroups: rule.APIGroups,
+					Resources: rule.Resources,
+					Verbs:     rule.Verbs,
+				})
+			}
+
+			role := &rbacv1.Role{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      roleName,
+					Namespace: agentRun.Namespace,
+					Labels: map[string]string{
+						"kubeclaw.io/agent-run":  agentRun.Name,
+						"kubeclaw.io/skill":      sc.skillPackName,
+						"kubeclaw.io/managed-by": "kubeclaw",
+					},
+				},
+				Rules: rules,
+			}
+			if err := controllerutil.SetControllerReference(agentRun, role, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner on Role")
+			}
+			if err := r.Create(ctx, role); err != nil && !errors.IsAlreadyExists(err) {
+				return fmt.Errorf("creating skill Role %s: %w", roleName, err)
+			}
+
+			rb := &rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      roleName,
+					Namespace: agentRun.Namespace,
+					Labels: map[string]string{
+						"kubeclaw.io/agent-run":  agentRun.Name,
+						"kubeclaw.io/skill":      sc.skillPackName,
+						"kubeclaw.io/managed-by": "kubeclaw",
+					},
+				},
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "Role",
+					Name:     roleName,
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						Kind:      "ServiceAccount",
+						Name:      "kubeclaw-agent",
+						Namespace: agentRun.Namespace,
+					},
+				},
+			}
+			if err := controllerutil.SetControllerReference(agentRun, rb, r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner on RoleBinding")
+			}
+			if err := r.Create(ctx, rb); err != nil && !errors.IsAlreadyExists(err) {
+				return fmt.Errorf("creating skill RoleBinding %s: %w", roleName, err)
+			}
+			log.Info("Created skill RBAC (namespaced)", "role", roleName, "skill", sc.skillPackName)
+		}
+
+		// Cluster-scoped ClusterRole + ClusterRoleBinding
+		if len(sc.sidecar.ClusterRBAC) > 0 {
+			crName := fmt.Sprintf("kubeclaw-skill-%s-%s", sc.skillPackName, agentRun.Name)
+			var rules []rbacv1.PolicyRule
+			for _, rule := range sc.sidecar.ClusterRBAC {
+				rules = append(rules, rbacv1.PolicyRule{
+					APIGroups: rule.APIGroups,
+					Resources: rule.Resources,
+					Verbs:     rule.Verbs,
+				})
+			}
+
+			cr := &rbacv1.ClusterRole{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: crName,
+					Labels: map[string]string{
+						"kubeclaw.io/agent-run":  agentRun.Name,
+						"kubeclaw.io/skill":      sc.skillPackName,
+						"kubeclaw.io/managed-by": "kubeclaw",
+					},
+				},
+				Rules: rules,
+			}
+			if err := r.Create(ctx, cr); err != nil && !errors.IsAlreadyExists(err) {
+				return fmt.Errorf("creating skill ClusterRole %s: %w", crName, err)
+			}
+
+			crb := &rbacv1.ClusterRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: crName,
+					Labels: map[string]string{
+						"kubeclaw.io/agent-run":  agentRun.Name,
+						"kubeclaw.io/skill":      sc.skillPackName,
+						"kubeclaw.io/managed-by": "kubeclaw",
+					},
+				},
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "ClusterRole",
+					Name:     crName,
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						Kind:      "ServiceAccount",
+						Name:      "kubeclaw-agent",
+						Namespace: agentRun.Namespace,
+					},
+				},
+			}
+			if err := r.Create(ctx, crb); err != nil && !errors.IsAlreadyExists(err) {
+				return fmt.Errorf("creating skill ClusterRoleBinding %s: %w", crName, err)
+			}
+			log.Info("Created skill RBAC (cluster)", "clusterRole", crName, "skill", sc.skillPackName)
+		}
+	}
+	return nil
+}
+
+// cleanupSkillRBAC removes cluster-scoped RBAC resources created for an AgentRun.
+// Namespace-scoped resources (Role, RoleBinding) are cleaned up automatically
+// via owner references and garbage collection.
+func (r *AgentRunReconciler) cleanupSkillRBAC(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) {
+	// List ClusterRoles owned by this run
+	crList := &rbacv1.ClusterRoleList{}
+	if err := r.List(ctx, crList, client.MatchingLabels{
+		"kubeclaw.io/agent-run":  agentRun.Name,
+		"kubeclaw.io/managed-by": "kubeclaw",
+	}); err == nil {
+		for i := range crList.Items {
+			if err := r.Delete(ctx, &crList.Items[i]); err != nil && !errors.IsNotFound(err) {
+				log.V(1).Info("Failed to delete ClusterRole", "name", crList.Items[i].Name, "err", err)
+			}
+		}
+	}
+
+	// List ClusterRoleBindings owned by this run
+	crbList := &rbacv1.ClusterRoleBindingList{}
+	if err := r.List(ctx, crbList, client.MatchingLabels{
+		"kubeclaw.io/agent-run":  agentRun.Name,
+		"kubeclaw.io/managed-by": "kubeclaw",
+	}); err == nil {
+		for i := range crbList.Items {
+			if err := r.Delete(ctx, &crbList.Items[i]); err != nil && !errors.IsNotFound(err) {
+				log.V(1).Info("Failed to delete ClusterRoleBinding", "name", crbList.Items[i].Name, "err", err)
+			}
+		}
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

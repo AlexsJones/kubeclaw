@@ -56,6 +56,10 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # RBAC for skill sidecar auto-provisioning
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Deployments for channel pods
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
