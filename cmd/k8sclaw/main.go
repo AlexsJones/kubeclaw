@@ -690,19 +690,11 @@ spec:
         action: ask
       - tool: write_file
         action: allow
-        conditions:
-          maxCallsPerRun: 100
       - tool: network_request
         action: deny
-  execGating:
-    allowShell: true
-    allowedCommands: [git, npm, go, python, make]
-    deniedCommands: ["rm -rf /", curl, wget]
-    maxExecTime: "30s"
   subagentPolicy:
     maxDepth: 3
     maxConcurrent: 5
-    inheritTools: true
   sandboxPolicy:
     required: false
     defaultImage: ghcr.io/alexsjones/k8sclaw/sandbox:latest
