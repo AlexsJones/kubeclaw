@@ -1,0 +1,13 @@
+# Controller Manager
+FROM golang:1.23-alpine AS builder
+RUN apk add --no-cache git ca-certificates
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /controller ./cmd/controller
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /controller /controller
+USER 65532:65532
+ENTRYPOINT ["/controller"]

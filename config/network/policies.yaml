@@ -1,0 +1,85 @@
+---
+# Default deny-all for agent pods (design doc section 5.3)
+# Each agent pod runs with network restrictions; only allowed
+# egress is to the event bus and control plane.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: k8sclaw-agent-deny-all
+  namespace: k8sclaw-system
+  labels:
+    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      k8sclaw.io/role: agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []   # Deny all inbound
+  egress: []    # Deny all outbound
+---
+# Allow agent pods to reach the event bus (NATS) and DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: k8sclaw-agent-allow-eventbus
+  namespace: k8sclaw-system
+  labels:
+    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      k8sclaw.io/role: agent
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow NATS event bus
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+---
+# Restrict agent pods with sandbox enabled — more restrictive
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: k8sclaw-sandbox-restricted
+  namespace: k8sclaw-system
+  labels:
+    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      k8sclaw.io/role: agent
+      k8sclaw.io/sandbox: "true"
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    # DNS only — sandbox containers have no external access
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow only IPC to the bridge sidecar (localhost)
+    - to:
+        - podSelector:
+            matchLabels:
+              k8sclaw.io/role: agent

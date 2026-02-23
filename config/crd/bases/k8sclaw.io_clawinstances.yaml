@@ -1,0 +1,157 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clawinstances.k8sclaw.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: k8sclaw.io
+  names:
+    kind: ClawInstance
+    listKind: ClawInstanceList
+    plural: clawinstances
+    singular: clawinstance
+    shortNames:
+      - ci
+      - claw
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Agent Pods
+          type: integer
+          jsonPath: .status.activeAgentPods
+        - name: Total Runs
+          type: integer
+          jsonPath: .status.totalAgentRuns
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: ClawInstance is the Schema for the clawinstances API. Represents a per-user/per-tenant gateway.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: ClawInstanceSpec defines the desired state of ClawInstance.
+              properties:
+                channels:
+                  type: array
+                  description: Channels defines the messaging channels to enable.
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [telegram, whatsapp, discord, slack]
+                      secretRef:
+                        type: string
+                      replicas:
+                        type: integer
+                        minimum: 0
+                    required: [type, secretRef]
+                agents:
+                  type: object
+                  description: Agents configures the default agent settings.
+                  properties:
+                    default:
+                      type: object
+                      properties:
+                        model:
+                          type: string
+                        image:
+                          type: string
+                        maxTokens:
+                          type: integer
+                    sandbox:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        image:
+                          type: string
+                        resourceLimits:
+                          type: object
+                          properties:
+                            cpu:
+                              type: string
+                            memory:
+                              type: string
+                    subagents:
+                      type: object
+                      properties:
+                        maxDepth:
+                          type: integer
+                        maxConcurrent:
+                          type: integer
+                skills:
+                  type: array
+                  description: Skills defines the SkillPacks to mount.
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      version:
+                        type: string
+                    required: [name]
+                policyRef:
+                  type: string
+                  description: Reference to a ClawPolicy.
+                authRefs:
+                  type: array
+                  description: References to auth secrets.
+                  items:
+                    type: object
+                    properties:
+                      provider:
+                        type: string
+                      secretName:
+                        type: string
+                    required: [provider, secretName]
+            status:
+              type: object
+              description: ClawInstanceStatus defines the observed state.
+              properties:
+                phase:
+                  type: string
+                channels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                activeAgentPods:
+                  type: integer
+                totalAgentRuns:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                    required: [type, status]

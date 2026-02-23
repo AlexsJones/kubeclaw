@@ -1,0 +1,36 @@
+---
+# Example ClawInstance with Telegram and Slack channels
+apiVersion: k8sclaw.io/v1alpha1
+kind: ClawInstance
+metadata:
+  name: alice
+  namespace: default
+spec:
+  channels:
+    - type: telegram
+      secretRef: alice-telegram-secret
+    - type: slack
+      secretRef: alice-slack-secret
+  agents:
+    default:
+      model: gpt-4o
+      image: ghcr.io/k8sclaw/agent-codex:latest
+      maxTokens: 128000
+    sandbox:
+      enabled: true
+      image: ghcr.io/k8sclaw/sandbox:latest
+      resourceLimits:
+        cpu: "2"
+        memory: 4Gi
+    subagents:
+      maxDepth: 3
+      maxConcurrent: 5
+  skills:
+    - name: code-review
+    - name: security-audit
+  policyRef: default-policy
+  authRefs:
+    - provider: github
+      secretName: alice-github-token
+    - provider: openai
+      secretName: alice-openai-key

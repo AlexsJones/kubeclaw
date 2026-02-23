@@ -1,0 +1,81 @@
+// Package main is the entry point for the K8sClaw API server.
+package main
+
+import (
+	"context"
+	"flag"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	"github.com/k8sclaw/k8sclaw/internal/apiserver"
+	"github.com/k8sclaw/k8sclaw/internal/eventbus"
+)
+
+var scheme = runtime.NewScheme()
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(k8sclawv1alpha1.AddToScheme(scheme))
+}
+
+func main() {
+	var addr string
+	var namespace string
+	var eventBusURL string
+
+	flag.StringVar(&addr, "addr", ":8090", "API server listen address")
+	flag.StringVar(&namespace, "namespace", "k8sclaw", "K8sClaw namespace")
+	flag.StringVar(&eventBusURL, "event-bus-url", "nats://nats.k8sclaw:4222", "Event bus URL")
+	flag.Parse()
+
+	log := zap.New(zap.UseDevMode(true))
+	ctrl.SetLogger(log)
+
+	// Build Kubernetes client
+	cfg := ctrl.GetConfigOrDie()
+	k8sClient, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme})
+	if err != nil {
+		log.Error(err, "unable to create manager")
+		os.Exit(1)
+	}
+
+	// Connect to event bus
+	bus, err := eventbus.NewNATSEventBus(eventBusURL)
+	if err != nil {
+		log.Error(err, "failed to connect to event bus")
+		os.Exit(1)
+	}
+	defer bus.Close()
+
+	// Create and start API server
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	// Start the manager cache in background
+	go func() {
+		if err := k8sClient.Start(ctx); err != nil {
+			log.Error(err, "manager failed")
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for cache sync
+	if !k8sClient.GetCache().WaitForCacheSync(ctx) {
+		log.Error(nil, "cache sync failed")
+		os.Exit(1)
+	}
+
+	server := apiserver.NewServer(k8sClient.GetClient(), bus, log.WithName("apiserver"))
+	if err := server.Start(addr); err != nil {
+		log.Error(err, "api server failed")
+		os.Exit(1)
+	}
+}

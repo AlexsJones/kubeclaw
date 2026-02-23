@@ -1,0 +1,105 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: skillpacks.k8sclaw.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: k8sclaw.io
+  names:
+    kind: SkillPack
+    listKind: SkillPackList
+    plural: skillpacks
+    singular: skillpack
+    shortNames:
+      - sp
+      - skill
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Skills
+          type: integer
+          jsonPath: .spec.skills
+          description: Number of skills in the pack
+        - name: ConfigMap
+          type: string
+          jsonPath: .status.configMapName
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: SkillPack is the Schema for the skillpacks API. Portable skill bundles that generate ConfigMaps.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: SkillPackSpec defines the desired state.
+              properties:
+                skills:
+                  type: array
+                  description: List of skills in this pack.
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      description:
+                        type: string
+                      content:
+                        type: string
+                        description: Skill definition content (Markdown).
+                      tools:
+                        type: array
+                        items:
+                          type: string
+                    required: [name, content]
+                runtimeRequirements:
+                  type: object
+                  description: Runtime requirements for this skill pack.
+                  properties:
+                    sandbox:
+                      type: boolean
+                    tools:
+                      type: array
+                      items:
+                        type: string
+                    minMemory:
+                      type: string
+                    minCPU:
+                      type: string
+            status:
+              type: object
+              properties:
+                configMapName:
+                  type: string
+                  description: Name of the generated ConfigMap.
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                    required: [type, status]

@@ -1,0 +1,151 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agentruns.k8sclaw.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: k8sclaw.io
+  names:
+    kind: AgentRun
+    listKind: AgentRunList
+    plural: agentruns
+    singular: agentrun
+    shortNames:
+      - ar
+      - run
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Instance
+          type: string
+          jsonPath: .spec.instanceRef
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Pod
+          type: string
+          jsonPath: .status.podName
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: AgentRun is the Schema for the agentruns API. Represents an ephemeral agent execution.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: AgentRunSpec defines the desired state of AgentRun.
+              required: [instanceRef, agentID, sessionKey, task]
+              properties:
+                instanceRef:
+                  type: string
+                  description: Reference to the owning ClawInstance.
+                agentID:
+                  type: string
+                  description: Unique agent identifier.
+                sessionKey:
+                  type: string
+                  description: Session key for conversation state.
+                parent:
+                  type: object
+                  description: Parent run reference for sub-agents.
+                  properties:
+                    name:
+                      type: string
+                    agentID:
+                      type: string
+                    depth:
+                      type: integer
+                  required: [name, agentID, depth]
+                task:
+                  type: string
+                  description: The task/prompt for the agent.
+                model:
+                  type: object
+                  description: Model configuration.
+                  properties:
+                    name:
+                      type: string
+                    provider:
+                      type: string
+                    maxTokens:
+                      type: integer
+                    temperature:
+                      type: string
+                sandbox:
+                  type: object
+                  description: Sandbox configuration.
+                  properties:
+                    enabled:
+                      type: boolean
+                    image:
+                      type: string
+                    mounts:
+                      type: array
+                      items:
+                        type: string
+                skills:
+                  type: array
+                  description: Skills to mount.
+                  items:
+                    type: string
+                toolPolicy:
+                  type: object
+                  description: Tool execution policy.
+                  properties:
+                    allowed:
+                      type: array
+                      items:
+                        type: string
+                    denied:
+                      type: array
+                      items:
+                        type: string
+                    requireApproval:
+                      type: array
+                      items:
+                        type: string
+                timeout:
+                  type: string
+                  description: Execution timeout (e.g. "5m").
+                cleanup:
+                  type: string
+                  description: Cleanup policy (Delete, Retain, OnFailure).
+                  enum: [Delete, Retain, OnFailure]
+            status:
+              type: object
+              description: AgentRunStatus defines the observed state.
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Running, Succeeded, Failed]
+                podName:
+                  type: string
+                jobName:
+                  type: string
+                startedAt:
+                  type: string
+                  format: date-time
+                completedAt:
+                  type: string
+                  format: date-time
+                result:
+                  type: string
+                error:
+                  type: string
+                exitCode:
+                  type: integer

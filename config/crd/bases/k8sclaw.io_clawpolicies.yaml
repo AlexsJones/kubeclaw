@@ -1,0 +1,159 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clawpolicies.k8sclaw.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: k8sclaw.io
+  names:
+    kind: ClawPolicy
+    listKind: ClawPolicyList
+    plural: clawpolicies
+    singular: clawpolicy
+    shortNames:
+      - cp
+      - pol
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Bound Instances
+          type: integer
+          jsonPath: .status.boundInstances
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: ClawPolicy is the Schema for the clawpolicies API. Feature and tool gating.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: ClawPolicySpec defines the desired state.
+              properties:
+                toolGating:
+                  type: object
+                  properties:
+                    defaultAction:
+                      type: string
+                      enum: [allow, deny, ask]
+                    rules:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          tool:
+                            type: string
+                          action:
+                            type: string
+                            enum: [allow, deny, ask]
+                          conditions:
+                            type: object
+                            properties:
+                              maxCallsPerRun:
+                                type: integer
+                              requireArgs:
+                                type: array
+                                items:
+                                  type: string
+                        required: [tool, action]
+                execGating:
+                  type: object
+                  properties:
+                    allowShell:
+                      type: boolean
+                    allowedCommands:
+                      type: array
+                      items:
+                        type: string
+                    deniedCommands:
+                      type: array
+                      items:
+                        type: string
+                    maxExecTime:
+                      type: string
+                subagentPolicy:
+                  type: object
+                  properties:
+                    maxDepth:
+                      type: integer
+                    maxConcurrent:
+                      type: integer
+                    inheritTools:
+                      type: boolean
+                sandboxPolicy:
+                  type: object
+                  properties:
+                    required:
+                      type: boolean
+                    defaultImage:
+                      type: string
+                    maxCPU:
+                      type: string
+                    maxMemory:
+                      type: string
+                mountPolicy:
+                  type: object
+                  properties:
+                    allowHostPath:
+                      type: boolean
+                    allowedPaths:
+                      type: array
+                      items:
+                        type: string
+                    additionalMounts:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          mountPath:
+                            type: string
+                          secretRef:
+                            type: string
+                          configMapRef:
+                            type: string
+                          readOnly:
+                            type: boolean
+                        required: [name, mountPath]
+                featureGates:
+                  type: object
+                  additionalProperties:
+                    type: boolean
+                  description: Feature gates map (e.g. browser-automation, code-execution).
+            status:
+              type: object
+              properties:
+                boundInstances:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                    required: [type, status]

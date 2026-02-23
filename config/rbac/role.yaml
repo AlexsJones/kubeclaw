@@ -1,0 +1,101 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8sclaw-controller-manager
+  namespace: k8sclaw-system
+  labels:
+    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/component: controller
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8sclaw-apiserver
+  namespace: k8sclaw-system
+  labels:
+    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/component: apiserver
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8sclaw-manager-role
+  labels:
+    app.kubernetes.io/name: k8sclaw
+rules:
+  # CRDs
+  - apiGroups: ["k8sclaw.io"]
+    resources:
+      - clawinstances
+      - agentruns
+      - clawpolicies
+      - skillpacks
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["k8sclaw.io"]
+    resources:
+      - clawinstances/status
+      - agentruns/status
+      - clawpolicies/status
+      - skillpacks/status
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["k8sclaw.io"]
+    resources:
+      - clawinstances/finalizers
+      - agentruns/finalizers
+      - clawpolicies/finalizers
+      - skillpacks/finalizers
+    verbs: ["update"]
+  # Core resources for agent pods
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Deployments for channel pods
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Jobs for agent runs
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Network policies for agent isolation
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8sclaw-manager-rolebinding
+  labels:
+    app.kubernetes.io/name: k8sclaw
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8sclaw-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: k8sclaw-controller-manager
+    namespace: k8sclaw-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8sclaw-apiserver-rolebinding
+  labels:
+    app.kubernetes.io/name: k8sclaw
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8sclaw-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: k8sclaw-apiserver
+    namespace: k8sclaw-system
