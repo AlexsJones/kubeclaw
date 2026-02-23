@@ -66,11 +66,21 @@ type ParentRunRef struct {
 
 // ModelSpec defines which LLM to use.
 type ModelSpec struct {
-	// Provider is the AI provider (anthropic, openai, etc.).
+	// Provider is the AI provider (openai, anthropic, azure-openai, github-copilot, ollama, etc.).
 	Provider string `json:"provider"`
 
 	// Model is the model identifier.
 	Model string `json:"model"`
+
+	// BaseURL overrides the provider's default API endpoint.
+	// Use this for OpenAI-compatible providers (GitHub Copilot, Azure OpenAI,
+	// Ollama, vLLM, LMStudio, etc.).
+	// Examples:
+	//   GitHub Copilot: https://api.githubcopilot.com
+	//   Azure OpenAI:   https://<resource>.openai.azure.com/openai/deployments/<deployment>
+	//   Ollama:         http://ollama.default.svc:11434/v1
+	// +optional
+	BaseURL string `json:"baseURL,omitempty"`
 
 	// Thinking mode (off, low, medium, high).
 	// +optional

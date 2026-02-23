@@ -13,6 +13,8 @@ spec:
   model:
     name: gpt-4o
     provider: openai
+    # baseURL: https://api.githubcopilot.com  # uncomment for GitHub Copilot
+    # baseURL: http://ollama.default.svc:11434/v1  # uncomment for Ollama
     maxTokens: 128000
   sandbox:
     enabled: true

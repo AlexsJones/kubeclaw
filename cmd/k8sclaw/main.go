@@ -453,18 +453,40 @@ func runOnboard() error {
 	fmt.Println("  Which model provider do you want to use?")
 	fmt.Println("    1) OpenAI")
 	fmt.Println("    2) Anthropic")
-	fmt.Println("    3) Other / bring-your-own")
-	providerChoice := prompt(reader, "  Choice [1-3]", "1")
+	fmt.Println("    3) GitHub Copilot  (uses your Copilot subscription)")
+	fmt.Println("    4) Azure OpenAI")
+	fmt.Println("    5) Ollama          (local, no API key needed)")
+	fmt.Println("    6) Other / OpenAI-compatible")
+	providerChoice := prompt(reader, "  Choice [1-6]", "1")
 
-	var providerName, secretEnvKey, modelName string
+	var providerName, secretEnvKey, modelName, baseURL string
 	switch providerChoice {
 	case "2":
 		providerName = "anthropic"
 		secretEnvKey = "ANTHROPIC_API_KEY"
 		modelName = prompt(reader, "  Model name", "claude-sonnet-4-20250514")
 	case "3":
+		providerName = "github-copilot"
+		secretEnvKey = "GITHUB_TOKEN"
+		baseURL = "https://api.githubcopilot.com"
+		modelName = prompt(reader, "  Model name", "gpt-4o")
+		fmt.Println("\n  💡 Use a GitHub PAT with the 'copilot' scope.")
+		fmt.Println("  Create one at: https://github.com/settings/tokens")
+	case "4":
+		providerName = "azure-openai"
+		secretEnvKey = "AZURE_OPENAI_API_KEY"
+		baseURL = prompt(reader, "  Azure OpenAI endpoint URL", "")
+		modelName = prompt(reader, "  Deployment name", "gpt-4o")
+	case "5":
+		providerName = "ollama"
+		secretEnvKey = ""
+		baseURL = prompt(reader, "  Ollama URL", "http://ollama.default.svc:11434/v1")
+		modelName = prompt(reader, "  Model name", "llama3")
+		fmt.Println("  💡 No API key needed for Ollama.")
+	case "6":
 		providerName = prompt(reader, "  Provider name", "custom")
-		secretEnvKey = prompt(reader, "  API key env var name", "API_KEY")
+		secretEnvKey = prompt(reader, "  API key env var name (empty if none)", "API_KEY")
+		baseURL = prompt(reader, "  API base URL", "")
 		modelName = prompt(reader, "  Model name", "")
 	default:
 		providerName = "openai"
@@ -472,11 +494,14 @@ func runOnboard() error {
 		modelName = prompt(reader, "  Model name", "gpt-4o")
 	}
 
-	apiKey := promptSecret(reader, fmt.Sprintf("  %s", secretEnvKey))
-	if apiKey == "" {
-		fmt.Println("  ⚠  No API key provided — you can add it later:")
-		fmt.Printf("  kubectl create secret generic %s-%s-key --from-literal=%s=<key>\n",
-			instanceName, providerName, secretEnvKey)
+	var apiKey string
+	if secretEnvKey != "" {
+		apiKey = promptSecret(reader, fmt.Sprintf("  %s", secretEnvKey))
+		if apiKey == "" {
+			fmt.Println("  ⚠  No API key provided — you can add it later:")
+			fmt.Printf("  kubectl create secret generic %s-%s-key --from-literal=%s=<key>\n",
+				instanceName, providerName, secretEnvKey)
+		}
 	}
 
 	providerSecretName := fmt.Sprintf("%s-%s-key", instanceName, providerName)
@@ -530,6 +555,9 @@ func runOnboard() error {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("  Instance:   %s  (namespace: %s)\n", instanceName, namespace)
 	fmt.Printf("  Provider:   %s  (model: %s)\n", providerName, modelName)
+	if baseURL != "" {
+		fmt.Printf("  Base URL:   %s\n", baseURL)
+	}
 	if channelType != "" {
 		fmt.Printf("  Channel:    %s\n", channelType)
 	} else {
@@ -581,7 +609,7 @@ func runOnboard() error {
 
 	// 4. Create ClawInstance.
 	fmt.Printf("  Creating ClawInstance %s...\n", instanceName)
-	instanceYAML := buildClawInstanceYAML(instanceName, namespace, modelName,
+	instanceYAML := buildClawInstanceYAML(instanceName, namespace, modelName, baseURL,
 		providerName, providerSecretName, channelType, channelSecretName,
 		policyName, applyPolicy)
 	if err := kubectlApplyStdin(instanceYAML); err != nil {
@@ -687,7 +715,7 @@ spec:
 `, name, ns)
 }
 
-func buildClawInstanceYAML(name, ns, model, provider, providerSecret,
+func buildClawInstanceYAML(name, ns, model, baseURL, provider, providerSecret,
 	channelType, channelSecret, policyName string, hasPolicy bool) string {
 
 	var channelsBlock string
@@ -704,6 +732,11 @@ func buildClawInstanceYAML(name, ns, model, provider, providerSecret,
 		policyBlock = fmt.Sprintf("  policyRef: %s\n", policyName)
 	}
 
+	var baseURLLine string
+	if baseURL != "" {
+		baseURLLine = fmt.Sprintf("      baseURL: %s\n", baseURL)
+	}
+
 	return fmt.Sprintf(`apiVersion: k8sclaw.io/v1alpha1
 kind: ClawInstance
 metadata:
@@ -713,10 +746,10 @@ spec:
 %s  agents:
     default:
       model: %s
-  authRefs:
+%s  authRefs:
     - provider: %s
       secret: %s
-%s`, name, ns, channelsBlock, model, provider, providerSecret, policyBlock)
+%s`, name, ns, channelsBlock, model, baseURLLine, provider, providerSecret, policyBlock)
 }
 
 func kubectlApplyStdin(yaml string) error {

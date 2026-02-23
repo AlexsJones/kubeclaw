@@ -49,6 +49,11 @@ type AgentConfig struct {
 	// Model is the LLM model to use.
 	Model string `json:"model"`
 
+	// BaseURL overrides the provider's default API endpoint.
+	// Use for OpenAI-compatible providers (GitHub Copilot, Azure OpenAI, Ollama, etc.).
+	// +optional
+	BaseURL string `json:"baseURL,omitempty"`
+
 	// Thinking is the thinking mode (off, low, medium, high).
 	// +optional
 	Thinking string `json:"thinking,omitempty"`
