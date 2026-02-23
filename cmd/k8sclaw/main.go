@@ -3448,7 +3448,7 @@ func (m tuiModel) renderFeed(width, height int) string {
 				shown := 0
 				for _, rl := range resultLines {
 					if shown >= 3 {
-						allLines = append(allLines, tuiDimStyle.Render("   ┊ Enter to view full"))
+						allLines = append(allLines, tuiDimStyle.Render("   ┊ f to expand"))
 						break
 					}
 					rl = strings.TrimRight(rl, " \t\r")
