@@ -1155,6 +1155,17 @@ var (
 	tuiSuggestDescSelectedStyle = lipgloss.NewStyle().
 					Foreground(lipgloss.Color("#1A1A2E")).
 					Background(lipgloss.Color("#E94560"))
+
+	// Feed pane styles
+	tuiFeedTitleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#F5C2E7")).
+				Bold(true)
+
+	tuiFeedPromptStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#89DCEB"))
+
+	tuiFeedMetaStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#585B70"))
 )
 
 func newTUICmd() *cobra.Command {
@@ -2677,6 +2688,14 @@ func (m tuiModel) View() string {
 		return view.String()
 	}
 
+	// Split pane: show a conversational feed on the right when instances exist
+	// and the terminal is wide enough.
+	showFeed := len(m.instances) > 0 && m.width >= 120
+	fullWidth := m.width
+	if showFeed {
+		m.width = fullWidth * 3 / 5 // left pane gets 60%
+	}
+
 	// Normal layout:
 	//  1. Header bar          (1 line)
 	//  2. Tab bar             (1 line)
@@ -2747,6 +2766,14 @@ func (m tuiModel) View() string {
 	view.WriteString(m.renderStatusBar())
 
 	base := view.String()
+
+	if showFeed {
+		rightW := fullWidth - m.width - 1 // 1 for vertical separator
+		feedStr := m.renderFeed(rightW, m.height)
+		base = joinPanesHorizontally(base, feedStr, m.width, rightW)
+		m.width = fullWidth // restore for overlay centering
+	}
+
 	if m.confirmDelete {
 		return m.renderDeleteConfirm(base)
 	}
@@ -3174,6 +3201,122 @@ func (m tuiModel) renderLog(logH int) string {
 			b.WriteString(" " + visible[i])
 		}
 		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (m tuiModel) renderFeed(width, height int) string {
+	var allLines []string
+
+	// Title bar
+	title := " " + tuiFeedTitleStyle.Render("─── Feed ")
+	titleW := lipgloss.Width(title)
+	if width > titleW {
+		title += tuiSepStyle.Render(strings.Repeat("─", width-titleW))
+	}
+	allLines = append(allLines, title)
+
+	if len(m.runs) == 0 {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  No runs yet"))
+		allLines = append(allLines, tuiDimStyle.Render("  Use /run <instance> <task>"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	// Build feed entries — oldest first (m.runs is sorted newest-first).
+	for i := len(m.runs) - 1; i >= 0; i-- {
+		run := m.runs[i]
+
+		// Prompt (task) line
+		task := run.Spec.Task
+		maxTaskW := width - 4
+		if maxTaskW < 10 {
+			maxTaskW = 10
+		}
+		if len(task) > maxTaskW {
+			task = task[:maxTaskW-3] + "..."
+		}
+		allLines = append(allLines, tuiFeedPromptStyle.Render(" ▸ "+task))
+
+		// Meta line (run name + age)
+		age := shortDuration(time.Since(run.CreationTimestamp.Time))
+		meta := fmt.Sprintf("   %s • %s", truncate(run.Name, width-12), age)
+		allLines = append(allLines, tuiFeedMetaStyle.Render(meta))
+
+		// Result / status
+		phase := string(run.Status.Phase)
+		switch phase {
+		case "Succeeded", "Completed":
+			if run.Status.Result != "" {
+				resultLines := strings.Split(run.Status.Result, "\n")
+				shown := 0
+				for _, rl := range resultLines {
+					if shown >= 3 {
+						allLines = append(allLines, tuiDimStyle.Render("   ┊ Enter to view full"))
+						break
+					}
+					rl = strings.TrimRight(rl, " \t\r")
+					if len(rl) > width-5 {
+						rl = rl[:width-8] + "..."
+					}
+					allLines = append(allLines, tuiSuccessStyle.Render("   "+rl))
+					shown++
+				}
+			} else {
+				allLines = append(allLines, tuiSuccessStyle.Render("   ✓ Completed"))
+			}
+		case "Running":
+			allLines = append(allLines, tuiRunningStyle.Render("   ⏳ Running..."))
+		case "Failed", "Timeout":
+			errMsg := run.Status.Error
+			if errMsg == "" {
+				errMsg = phase
+			}
+			if len(errMsg) > width-6 {
+				errMsg = errMsg[:width-9] + "..."
+			}
+			allLines = append(allLines, tuiErrorStyle.Render("   ✗ "+errMsg))
+		default:
+			allLines = append(allLines, tuiDimStyle.Render("   ⏳ Pending..."))
+		}
+
+		allLines = append(allLines, "") // blank separator
+	}
+
+	// Auto-scroll: keep title, then show the last entries that fit.
+	available := height - 1
+	if available < 1 {
+		available = 1
+	}
+	feedContent := allLines[1:] // skip title
+	start := len(feedContent) - available
+	if start < 0 {
+		start = 0
+	}
+	visible := feedContent[start:]
+
+	result := []string{allLines[0]}
+	result = append(result, visible...)
+	for len(result) < height {
+		result = append(result, "")
+	}
+	return padAndJoinLines(result, width)
+}
+
+func padAndJoinLines(lines []string, width int) string {
+	var b strings.Builder
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		if w < width {
+			line += strings.Repeat(" ", width-w)
+		}
+		b.WriteString(line)
+		if i < len(lines)-1 {
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }
@@ -4193,6 +4336,44 @@ func padRight(s string, w int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", w-sw)
+}
+
+func joinPanesHorizontally(left, right string, leftW, rightW int) string {
+	leftLines := strings.Split(left, "\n")
+	rightLines := strings.Split(right, "\n")
+
+	// Trim a trailing empty line that Split produces when string ends with \n.
+	if len(leftLines) > 0 && leftLines[len(leftLines)-1] == "" {
+		leftLines = leftLines[:len(leftLines)-1]
+	}
+
+	sepStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#313244")).Render("│")
+
+	maxLines := len(leftLines)
+	if len(rightLines) > maxLines {
+		maxLines = len(rightLines)
+	}
+
+	var b strings.Builder
+	for i := 0; i < maxLines; i++ {
+		var l, r string
+		if i < len(leftLines) {
+			l = leftLines[i]
+		}
+		if i < len(rightLines) {
+			r = rightLines[i]
+		}
+		// Pad left line to leftW so the separator aligns.
+		lw := lipgloss.Width(l)
+		if lw < leftW {
+			l += strings.Repeat(" ", leftW-lw)
+		}
+		b.WriteString(l + sepStr + r)
+		if i < maxLines-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func truncate(s string, maxLen int) string {
