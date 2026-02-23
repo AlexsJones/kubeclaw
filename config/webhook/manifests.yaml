@@ -70,19 +70,22 @@ metadata:
   annotations:
     cert-manager.io/inject-ca-from: k8sclaw-system/k8sclaw-webhook-cert
 webhooks:
-  - name: vagentrun.k8sclaw.io
+  - name: vagentpod.k8sclaw.io
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
         name: k8sclaw-webhook-service
         namespace: k8sclaw-system
-        path: /validate-k8sclaw-io-v1alpha1-agentrun
-    failurePolicy: Fail
+        path: /validate-agent-pods
+    failurePolicy: Ignore
     rules:
-      - apiGroups: ["k8sclaw.io"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["agentruns"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+    objectSelector:
+      matchLabels:
+        k8sclaw.io/agent-pod: "true"
     sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -92,18 +95,21 @@ metadata:
   annotations:
     cert-manager.io/inject-ca-from: k8sclaw-system/k8sclaw-webhook-cert
 webhooks:
-  - name: magentrun.k8sclaw.io
+  - name: magentpod.k8sclaw.io
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
         name: k8sclaw-webhook-service
         namespace: k8sclaw-system
-        path: /mutate-k8sclaw-io-v1alpha1-agentrun
-    failurePolicy: Fail
+        path: /mutate-agent-pods
+    failurePolicy: Ignore
     rules:
-      - apiGroups: ["k8sclaw.io"]
-        apiVersions: ["v1alpha1"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
         operations: ["CREATE"]
-        resources: ["agentruns"]
+        resources: ["pods"]
+    objectSelector:
+      matchLabels:
+        k8sclaw.io/agent-pod: "true"
     sideEffects: None
     reinvocationPolicy: IfNeeded
