@@ -16,10 +16,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
-const clawScheduleFinalizer = "k8sclaw.io/schedule-finalizer"
+const clawScheduleFinalizer = "kubeclaw.io/schedule-finalizer"
 
 // ClawScheduleReconciler reconciles ClawSchedule objects.
 type ClawScheduleReconciler struct {
@@ -28,15 +28,15 @@ type ClawScheduleReconciler struct {
 	Log    logr.Logger
 }
 
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawschedules,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawschedules/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawschedules/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawschedules,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawschedules/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawschedules/finalizers,verbs=update
 
 // Reconcile handles ClawSchedule create/update/delete events.
 func (r *ClawScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("clawschedule", req.NamespacedName)
 
-	schedule := &k8sclawv1alpha1.ClawSchedule{}
+	schedule := &kubeclawv1alpha1.ClawSchedule{}
 	if err := r.Get(ctx, req.NamespacedName, schedule); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -105,13 +105,13 @@ func (r *ClawScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Check concurrency policy.
 	if schedule.Spec.ConcurrencyPolicy == "Forbid" && schedule.Status.LastRunName != "" {
-		lastAgentRun := &k8sclawv1alpha1.AgentRun{}
+		lastAgentRun := &kubeclawv1alpha1.AgentRun{}
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: schedule.Namespace,
 			Name:      schedule.Status.LastRunName,
 		}, lastAgentRun); err == nil {
-			if lastAgentRun.Status.Phase == k8sclawv1alpha1.AgentRunPhaseRunning ||
-				lastAgentRun.Status.Phase == k8sclawv1alpha1.AgentRunPhasePending ||
+			if lastAgentRun.Status.Phase == kubeclawv1alpha1.AgentRunPhaseRunning ||
+				lastAgentRun.Status.Phase == kubeclawv1alpha1.AgentRunPhasePending ||
 				lastAgentRun.Status.Phase == "" {
 				log.Info("Skipping trigger — previous run still active (Forbid policy)")
 				_ = r.Status().Update(ctx, schedule)
@@ -130,7 +130,7 @@ func (r *ClawScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Look up instance to get model config.
-	instance := &k8sclawv1alpha1.ClawInstance{}
+	instance := &kubeclawv1alpha1.ClawInstance{}
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: schedule.Namespace,
 		Name:      schedule.Spec.InstanceRef,
@@ -143,21 +143,21 @@ func (r *ClawScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Create the AgentRun.
 	runName := fmt.Sprintf("%s-%d", schedule.Name, schedule.Status.TotalRuns+1)
-	agentRun := &k8sclawv1alpha1.AgentRun{
+	agentRun := &kubeclawv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      runName,
 			Namespace: schedule.Namespace,
 			Labels: map[string]string{
-				"k8sclaw.io/instance": schedule.Spec.InstanceRef,
-				"k8sclaw.io/schedule": schedule.Name,
-				"k8sclaw.io/type":     schedule.Spec.Type,
+				"kubeclaw.io/instance": schedule.Spec.InstanceRef,
+				"kubeclaw.io/schedule": schedule.Name,
+				"kubeclaw.io/type":     schedule.Spec.Type,
 			},
 		},
-		Spec: k8sclawv1alpha1.AgentRunSpec{
+		Spec: kubeclawv1alpha1.AgentRunSpec{
 			InstanceRef: schedule.Spec.InstanceRef,
 			Task:        task,
 			AgentID:     fmt.Sprintf("schedule-%s", schedule.Name),
-			Model: k8sclawv1alpha1.ModelSpec{
+			Model: kubeclawv1alpha1.ModelSpec{
 				Model: instance.Spec.Agents.Default.Model,
 			},
 		},
@@ -231,7 +231,7 @@ func (r *ClawScheduleReconciler) readMemoryConfigMap(ctx context.Context, namesp
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClawScheduleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&k8sclawv1alpha1.ClawSchedule{}).
-		Owns(&k8sclawv1alpha1.AgentRun{}).
+		For(&kubeclawv1alpha1.ClawSchedule{}).
+		Owns(&kubeclawv1alpha1.AgentRun{}).
 		Complete(r)
 }

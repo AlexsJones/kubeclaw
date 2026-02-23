@@ -1,4 +1,4 @@
-// Package main provides the k8sclaw CLI tool for managing K8sClaw resources.
+// Package main provides the kubeclaw CLI tool for managing KubeClaw resources.
 package main
 
 import (
@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
 var (
@@ -42,16 +42,16 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "k8sclaw",
-		Short: "K8sClaw - Kubernetes-native AI agent management",
-		Long: `K8sClaw CLI for managing ClawInstances, AgentRuns, ClawPolicies,
+		Use:   "kubeclaw",
+		Short: "KubeClaw - Kubernetes-native AI agent management",
+		Long: `KubeClaw CLI for managing ClawInstances, AgentRuns, ClawPolicies,
 SkillPacks, and feature gates in your Kubernetes cluster.
 
 Running without a subcommand launches the interactive TUI.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip K8s client init for commands that don't need it.
 			switch cmd.Name() {
-			case "version", "install", "uninstall", "onboard", "tui", "k8sclaw":
+			case "version", "install", "uninstall", "onboard", "tui", "kubeclaw":
 				return nil
 			}
 			return initClient()
@@ -92,7 +92,7 @@ Running without a subcommand launches the interactive TUI.`,
 func initClient() error {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
-	if err := k8sclawv1alpha1.AddToScheme(scheme); err != nil {
+	if err := kubeclawv1alpha1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("failed to register scheme: %w", err)
 	}
 
@@ -130,7 +130,7 @@ func newInstancesCmd() *cobra.Command {
 			Short: "List ClawInstances",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var list k8sclawv1alpha1.ClawInstanceList
+				var list kubeclawv1alpha1.ClawInstanceList
 				if err := k8sClient.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 					return err
 				}
@@ -156,7 +156,7 @@ func newInstancesCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var inst k8sclawv1alpha1.ClawInstance
+				var inst kubeclawv1alpha1.ClawInstance
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: args[0], Namespace: namespace}, &inst); err != nil {
 					return err
 				}
@@ -171,7 +171,7 @@ func newInstancesCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				inst := &k8sclawv1alpha1.ClawInstance{
+				inst := &kubeclawv1alpha1.ClawInstance{
 					ObjectMeta: metav1.ObjectMeta{Name: args[0], Namespace: namespace},
 				}
 				if err := k8sClient.Delete(ctx, inst); err != nil {
@@ -198,7 +198,7 @@ func newRunsCmd() *cobra.Command {
 			Short: "List AgentRuns",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var list k8sclawv1alpha1.AgentRunList
+				var list kubeclawv1alpha1.AgentRunList
 				if err := k8sClient.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 					return err
 				}
@@ -219,7 +219,7 @@ func newRunsCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var run k8sclawv1alpha1.AgentRun
+				var run kubeclawv1alpha1.AgentRun
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: args[0], Namespace: namespace}, &run); err != nil {
 					return err
 				}
@@ -234,7 +234,7 @@ func newRunsCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var run k8sclawv1alpha1.AgentRun
+				var run kubeclawv1alpha1.AgentRun
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: args[0], Namespace: namespace}, &run); err != nil {
 					return err
 				}
@@ -262,7 +262,7 @@ func newPoliciesCmd() *cobra.Command {
 			Short: "List ClawPolicies",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var list k8sclawv1alpha1.ClawPolicyList
+				var list kubeclawv1alpha1.ClawPolicyList
 				if err := k8sClient.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 					return err
 				}
@@ -281,7 +281,7 @@ func newPoliciesCmd() *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var pol k8sclawv1alpha1.ClawPolicy
+				var pol kubeclawv1alpha1.ClawPolicy
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: args[0], Namespace: namespace}, &pol); err != nil {
 					return err
 				}
@@ -307,7 +307,7 @@ func newSkillsCmd() *cobra.Command {
 			Short: "List SkillPacks",
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ctx := context.Background()
-				var list k8sclawv1alpha1.SkillPackList
+				var list kubeclawv1alpha1.SkillPackList
 				if err := k8sClient.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 					return err
 				}
@@ -361,7 +361,7 @@ func newFeaturesCmd() *cobra.Command {
 				return fmt.Errorf("--policy is required")
 			}
 			ctx := context.Background()
-			var pol k8sclawv1alpha1.ClawPolicy
+			var pol kubeclawv1alpha1.ClawPolicy
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: policyName, Namespace: namespace}, &pol); err != nil {
 				return err
 			}
@@ -388,7 +388,7 @@ func toggleFeature(feature string, enabled bool, cmd *cobra.Command) error {
 	}
 
 	ctx := context.Background()
-	var pol k8sclawv1alpha1.ClawPolicy
+	var pol kubeclawv1alpha1.ClawPolicy
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: policyName, Namespace: namespace}, &pol); err != nil {
 		return err
 	}
@@ -415,14 +415,14 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("k8sclaw %s\n", version)
+			fmt.Printf("kubeclaw %s\n", version)
 		},
 	}
 }
 
 const (
-	ghRepo         = "AlexsJones/k8sclaw"
-	manifestAsset  = "k8sclaw-manifests.tar.gz"
+	ghRepo         = "AlexsJones/kubeclaw"
+	manifestAsset  = "kubeclaw-manifests.tar.gz"
 )
 
 // ── Onboard ──────────────────────────────────────────────────────────────────
@@ -430,7 +430,7 @@ const (
 func newOnboardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "onboard",
-		Short: "Interactive setup wizard for K8sClaw",
+		Short: "Interactive setup wizard for KubeClaw",
 		Long: `Walks you through creating your first ClawInstance, connecting a
 channel (Telegram, Slack, Discord, or WhatsApp), setting up your AI provider
 credentials, and optionally applying a default ClawPolicy.`,
@@ -445,22 +445,22 @@ func runOnboard() error {
 
 	printBanner()
 
-	// ── Step 1: Check K8sClaw is installed ───────────────────────────────
+	// ── Step 1: Check KubeClaw is installed ───────────────────────────────
 	fmt.Println("\n📋 Step 1/5 — Checking cluster...")
 	if err := initClient(); err != nil {
 		fmt.Println("\n  ❌ Cannot connect to your cluster.")
-		fmt.Println("  Make sure kubectl is configured and run: k8sclaw install")
+		fmt.Println("  Make sure kubectl is configured and run: kubeclaw install")
 		return err
 	}
 
 	// Quick health check: can we list CRDs?
 	ctx := context.Background()
-	var instances k8sclawv1alpha1.ClawInstanceList
+	var instances kubeclawv1alpha1.ClawInstanceList
 	if err := k8sClient.List(ctx, &instances, client.InNamespace(namespace)); err != nil {
-		fmt.Println("\n  ❌ K8sClaw CRDs not found. Run 'k8sclaw install' first.")
+		fmt.Println("\n  ❌ KubeClaw CRDs not found. Run 'kubeclaw install' first.")
 		return fmt.Errorf("CRDs not installed: %w", err)
 	}
-	fmt.Println("  ✅ K8sClaw is installed and CRDs are available.")
+	fmt.Println("  ✅ KubeClaw is installed and CRDs are available.")
 
 	// ── Step 2: Instance name ────────────────────────────────────────────
 	fmt.Println("\n📋 Step 2/5 — Create your ClawInstance")
@@ -637,13 +637,13 @@ func runOnboard() error {
 	fmt.Println()
 	fmt.Println("  Next steps:")
 	fmt.Println("  ─────────────────────────────────────────────────")
-	fmt.Printf("  • Check your instance:   k8sclaw instances get %s\n", instanceName)
+	fmt.Printf("  • Check your instance:   kubeclaw instances get %s\n", instanceName)
 	if channelType == "telegram" {
 		fmt.Println("  • Send a message to your Telegram bot — it's live!")
 	}
 	fmt.Printf("  • Run an agent:          kubectl apply -f config/samples/agentrun_sample.yaml\n")
-	fmt.Printf("  • View runs:             k8sclaw runs list\n")
-	fmt.Printf("  • Feature gates:         k8sclaw features list --policy %s\n", policyName)
+	fmt.Printf("  • View runs:             kubeclaw runs list\n")
+	fmt.Printf("  • Feature gates:         kubeclaw features list --policy %s\n", policyName)
 	fmt.Println()
 	return nil
 }
@@ -651,7 +651,7 @@ func runOnboard() error {
 func printBanner() {
 	fmt.Println()
 	fmt.Println("  ╔═══════════════════════════════════════════╗")
-	fmt.Println("  ║         K8sClaw · Onboarding Wizard       ║")
+	fmt.Println("  ║         KubeClaw · Onboarding Wizard       ║")
 	fmt.Println("  ╚═══════════════════════════════════════════╝")
 }
 
@@ -693,7 +693,7 @@ func promptYN(reader *bufio.Reader, label string, defaultYes bool) bool {
 }
 
 func buildDefaultPolicyYAML(name, ns string) string {
-	return fmt.Sprintf(`apiVersion: k8sclaw.io/v1alpha1
+	return fmt.Sprintf(`apiVersion: kubeclaw.io/v1alpha1
 kind: ClawPolicy
 metadata:
   name: %s
@@ -713,7 +713,7 @@ spec:
     maxConcurrent: 5
   sandboxPolicy:
     required: false
-    defaultImage: ghcr.io/alexsjones/k8sclaw/sandbox:latest
+    defaultImage: ghcr.io/alexsjones/kubeclaw/sandbox:latest
     maxCPU: "4"
     maxMemory: 8Gi
   featureGates:
@@ -753,7 +753,7 @@ func buildClawInstanceYAML(name, ns, model, baseURL, provider, providerSecret,
 `, provider, providerSecret)
 	}
 
-	return fmt.Sprintf(`apiVersion: k8sclaw.io/v1alpha1
+	return fmt.Sprintf(`apiVersion: kubeclaw.io/v1alpha1
 kind: ClawInstance
 metadata:
   name: %s
@@ -777,8 +777,8 @@ func newInstallCmd() *cobra.Command {
 	var manifestVersion string
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install K8sClaw into the current Kubernetes cluster",
-		Long: `Downloads the K8sClaw release manifests from GitHub and applies
+		Short: "Install KubeClaw into the current Kubernetes cluster",
+		Long: `Downloads the KubeClaw release manifests from GitHub and applies
 them to your current Kubernetes cluster using kubectl.
 
 Installs CRDs, the controller manager, API server, admission webhook,
@@ -794,7 +794,7 @@ RBAC rules, and network policies.`,
 func newUninstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove K8sClaw from the current Kubernetes cluster",
+		Short: "Remove KubeClaw from the current Kubernetes cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUninstall()
 		},
@@ -814,11 +814,11 @@ func runInstall(ver string) error {
 		}
 	}
 
-	fmt.Printf("  Installing K8sClaw %s...\n", ver)
+	fmt.Printf("  Installing KubeClaw %s...\n", ver)
 
 	// Download manifest bundle.
 	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", ghRepo, ver, manifestAsset)
-	tmpDir, err := os.MkdirTemp("", "k8sclaw-install-*")
+	tmpDir, err := os.MkdirTemp("", "kubeclaw-install-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
@@ -847,7 +847,7 @@ func runInstall(ver string) error {
 	// Create namespace before RBAC (ServiceAccounts reference it).
 	// Ignore AlreadyExists error on re-installs.
 	fmt.Println("  Creating namespace...")
-	_ = kubectl("create", "namespace", "k8sclaw-system")
+	_ = kubectl("create", "namespace", "kubeclaw-system")
 
 	// Deploy NATS event bus.
 	fmt.Println("  Deploying NATS event bus...")
@@ -897,13 +897,13 @@ func runInstall(ver string) error {
 		return err
 	}
 
-	fmt.Println("\n  K8sClaw installed successfully!")
-	fmt.Println("  Run: kubectl get pods -n k8sclaw-system")
+	fmt.Println("\n  KubeClaw installed successfully!")
+	fmt.Println("  Run: kubectl get pods -n kubeclaw-system")
 	return nil
 }
 
 func runUninstall() error {
-	fmt.Println("  Removing K8sClaw...")
+	fmt.Println("  Removing KubeClaw...")
 
 	// Delete in reverse order.
 	manifests := []string{
@@ -916,9 +916,9 @@ func runUninstall() error {
 		_ = kubectl("delete", "--ignore-not-found", "-f", m)
 	}
 
-	// Strip finalizers from all K8sClaw CRD instances so CRD deletion doesn't
+	// Strip finalizers from all KubeClaw CRD instances so CRD deletion doesn't
 	// hang waiting for the (now-deleted) controller to reconcile them.
-	fmt.Println("  Removing finalizers from K8sClaw resources...")
+	fmt.Println("  Removing finalizers from KubeClaw resources...")
 	for _, res := range []string{"agentruns", "clawinstances", "clawpolicies", "skillpacks"} {
 		stripFinalizers(res)
 	}
@@ -926,23 +926,23 @@ func runUninstall() error {
 	// CRDs last.
 	crdBase := "https://raw.githubusercontent.com/" + ghRepo + "/main/config/crd/bases/"
 	crds := []string{
-		"k8sclaw.io_clawinstances.yaml",
-		"k8sclaw.io_agentruns.yaml",
-		"k8sclaw.io_clawpolicies.yaml",
-		"k8sclaw.io_skillpacks.yaml",
+		"kubeclaw.io_clawinstances.yaml",
+		"kubeclaw.io_agentruns.yaml",
+		"kubeclaw.io_clawpolicies.yaml",
+		"kubeclaw.io_skillpacks.yaml",
 	}
 	for _, c := range crds {
 		_ = kubectl("delete", "--ignore-not-found", "-f", crdBase+c)
 	}
 
-	fmt.Println("  K8sClaw uninstalled.")
+	fmt.Println("  KubeClaw uninstalled.")
 	return nil
 }
 
-// stripFinalizers patches all instances of a K8sClaw CRD to remove finalizers.
+// stripFinalizers patches all instances of a KubeClaw CRD to remove finalizers.
 func stripFinalizers(resource string) {
 	// List all resource names across all namespaces.
-	out, err := exec.Command("kubectl", "get", resource+".k8sclaw.io",
+	out, err := exec.Command("kubectl", "get", resource+".kubeclaw.io",
 		"--all-namespaces", "-o", "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{\"\\n\"}{end}").
 		Output()
 	if err != nil {
@@ -957,7 +957,7 @@ func stripFinalizers(resource string) {
 			continue
 		}
 		ns, name := parts[0], parts[1]
-		_ = exec.Command("kubectl", "patch", resource+".k8sclaw.io", name,
+		_ = exec.Command("kubectl", "patch", resource+".kubeclaw.io", name,
 			"-n", ns, "--type=merge",
 			"-p", `{"metadata":{"finalizers":[]}}`).Run()
 	}
@@ -1172,7 +1172,7 @@ var (
 func newTUICmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
-		Short: "Interactive terminal UI for managing K8sClaw",
+		Short: "Interactive terminal UI for managing KubeClaw",
 		Long:  `Launch an interactive terminal interface with slash commands for managing ClawInstances, AgentRuns, policies, and more.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := initClient(); err != nil {
@@ -1199,13 +1199,13 @@ type suggestionsMsg struct {
 	items []suggestion
 }
 type dataRefreshMsg struct {
-	instances *[]k8sclawv1alpha1.ClawInstance
-	runs      *[]k8sclawv1alpha1.AgentRun
-	policies  *[]k8sclawv1alpha1.ClawPolicy
-	skills    *[]k8sclawv1alpha1.SkillPack
+	instances *[]kubeclawv1alpha1.ClawInstance
+	runs      *[]kubeclawv1alpha1.AgentRun
+	policies  *[]kubeclawv1alpha1.ClawPolicy
+	skills    *[]kubeclawv1alpha1.SkillPack
 	channels  *[]channelRow
 	pods      *[]podRow
-	schedules *[]k8sclawv1alpha1.ClawSchedule
+	schedules *[]kubeclawv1alpha1.ClawSchedule
 	fetchErr  string
 }
 
@@ -1381,13 +1381,13 @@ type tuiModel struct {
 	wizard wizardState
 
 	// Cached K8s data
-	instances []k8sclawv1alpha1.ClawInstance
-	runs      []k8sclawv1alpha1.AgentRun
-	policies  []k8sclawv1alpha1.ClawPolicy
-	skills    []k8sclawv1alpha1.SkillPack
+	instances []kubeclawv1alpha1.ClawInstance
+	runs      []kubeclawv1alpha1.AgentRun
+	policies  []kubeclawv1alpha1.ClawPolicy
+	skills    []kubeclawv1alpha1.SkillPack
 	channels  []channelRow
 	pods      []podRow
-	schedules []k8sclawv1alpha1.ClawSchedule
+	schedules []kubeclawv1alpha1.ClawSchedule
 
 	// Input
 	input        textinput.Model
@@ -1441,7 +1441,7 @@ func newTUIModel(ns string) tuiModel {
 		feedInput:    fi,
 		inputFocused: false,
 		activeView:   viewInstances,
-		logLines:     []string{tuiDimStyle.Render("K8sClaw TUI ready — press ? for help, / to enter commands")},
+		logLines:     []string{tuiDimStyle.Render("KubeClaw TUI ready — press ? for help, / to enter commands")},
 	}
 }
 
@@ -1476,11 +1476,11 @@ func (m tuiModel) selectedInstanceForFeed() string {
 }
 
 // runsForInstance returns runs filtered by instance name, oldest-first.
-func (m tuiModel) runsForInstance(instName string) []k8sclawv1alpha1.AgentRun {
+func (m tuiModel) runsForInstance(instName string) []kubeclawv1alpha1.AgentRun {
 	if instName == "" {
 		return nil
 	}
-	var filtered []k8sclawv1alpha1.AgentRun
+	var filtered []kubeclawv1alpha1.AgentRun
 	// m.runs is sorted newest-first; iterate in reverse for oldest-first.
 	for i := len(m.runs) - 1; i >= 0; i-- {
 		if m.runs[i].Spec.InstanceRef == instName {
@@ -1532,10 +1532,10 @@ func refreshDataCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		var inst k8sclawv1alpha1.ClawInstanceList
-		var runs k8sclawv1alpha1.AgentRunList
-		var pols k8sclawv1alpha1.ClawPolicyList
-		var skls k8sclawv1alpha1.SkillPackList
+		var inst kubeclawv1alpha1.ClawInstanceList
+		var runs kubeclawv1alpha1.AgentRunList
+		var pols kubeclawv1alpha1.ClawPolicyList
+		var skls kubeclawv1alpha1.SkillPackList
 
 		// Fetch resources — track errors so the TUI can surface them.
 		var errs []string
@@ -1566,7 +1566,7 @@ func refreshDataCmd() tea.Cmd {
 		}
 
 		// Fetch schedules.
-		var scheds k8sclawv1alpha1.ClawScheduleList
+		var scheds kubeclawv1alpha1.ClawScheduleList
 		if err := k8sClient.List(ctx, &scheds); err != nil {
 			errs = append(errs, fmt.Sprintf("schedules: %v", err))
 		} else {
@@ -1580,7 +1580,7 @@ func refreshDataCmd() tea.Cmd {
 		// Build channel rows from instances.
 		var chRows []channelRow
 		for _, i := range inst.Items {
-			statusMap := make(map[string]k8sclawv1alpha1.ChannelStatus)
+			statusMap := make(map[string]kubeclawv1alpha1.ChannelStatus)
 			for _, cs := range i.Status.Channels {
 				statusMap[cs.Type] = cs
 			}
@@ -1602,14 +1602,14 @@ func refreshDataCmd() tea.Cmd {
 			}
 		}
 
-		// Build pod rows from actual pods labelled for k8sclaw.
+		// Build pod rows from actual pods labelled for kubeclaw.
 		var podRows []podRow
 		var podList corev1.PodList
-		if err := k8sClient.List(ctx, &podList, client.MatchingLabels{"app.kubernetes.io/managed-by": "k8sclaw"}); err != nil {
+		if err := k8sClient.List(ctx, &podList, client.MatchingLabels{"app.kubernetes.io/managed-by": "kubeclaw"}); err != nil {
 			errs = append(errs, fmt.Sprintf("pods: %v", err))
 		} else {
 			for _, p := range podList.Items {
-				instName := p.Labels["k8sclaw.io/instance"]
+				instName := p.Labels["kubeclaw.io/instance"]
 				var restarts int32
 				for _, cs := range p.Status.ContainerStatuses {
 					restarts += cs.RestartCount
@@ -2619,7 +2619,7 @@ func fetchInstanceSuggestions(ns, prefix string) []suggestion {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var list k8sclawv1alpha1.ClawInstanceList
+	var list kubeclawv1alpha1.ClawInstanceList
 	if err := k8sClient.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil
 	}
@@ -2642,7 +2642,7 @@ func fetchRunSuggestions(ns, prefix string, activeOnly bool) []suggestion {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var list k8sclawv1alpha1.AgentRunList
+	var list kubeclawv1alpha1.AgentRunList
 	if err := k8sClient.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil
 	}
@@ -2668,7 +2668,7 @@ func fetchPolicySuggestions(ns, prefix string) []suggestion {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var list k8sclawv1alpha1.ClawPolicyList
+	var list kubeclawv1alpha1.ClawPolicyList
 	if err := k8sClient.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil
 	}
@@ -3046,7 +3046,7 @@ func (m tuiModel) View() string {
 }
 
 func (m tuiModel) renderHeader() string {
-	logo := tuiBannerStyle.Render(" K8sClaw ")
+	logo := tuiBannerStyle.Render(" KubeClaw ")
 	connIcon := tuiSuccessStyle.Render(" ●")
 	if !m.connected {
 		connIcon = tuiErrorStyle.Render(" ●")
@@ -3956,7 +3956,7 @@ func (m tuiModel) renderModalOverlay(base string) string {
 
 func tuiCreateRun(ns, instance, task string) (string, error) {
 	ctx := context.Background()
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: instance, Namespace: ns}, &inst); err != nil {
 		return "", fmt.Errorf("instance %q not found: %w", instance, err)
 	}
@@ -3981,12 +3981,12 @@ func tuiCreateRun(ns, instance, task string) (string, error) {
 	}
 
 	runName := fmt.Sprintf("%s-run-%d", instance, time.Now().Unix())
-	run := &k8sclawv1alpha1.AgentRun{
+	run := &kubeclawv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: ns},
-		Spec: k8sclawv1alpha1.AgentRunSpec{
+		Spec: kubeclawv1alpha1.AgentRunSpec{
 			InstanceRef: instance,
 			Task:        task,
-			Model: k8sclawv1alpha1.ModelSpec{
+			Model: kubeclawv1alpha1.ModelSpec{
 				Provider:      provider,
 				Model:         inst.Spec.Agents.Default.Model,
 				BaseURL:       inst.Spec.Agents.Default.BaseURL,
@@ -4026,7 +4026,7 @@ func extractUserMessage(task string) string {
 
 func tuiAbortRun(ns, name string) (string, error) {
 	ctx := context.Background()
-	var run k8sclawv1alpha1.AgentRun
+	var run kubeclawv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &run); err != nil {
 		return "", fmt.Errorf("run %q not found: %w", name, err)
 	}
@@ -4041,7 +4041,7 @@ func tuiAbortRun(ns, name string) (string, error) {
 
 func tuiRunStatus(ns, name string) (string, error) {
 	ctx := context.Background()
-	var run k8sclawv1alpha1.AgentRun
+	var run kubeclawv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &run); err != nil {
 		return "", fmt.Errorf("run %q not found: %w", name, err)
 	}
@@ -4073,9 +4073,9 @@ func tuiRunStatus(ns, name string) (string, error) {
 
 func tuiClusterStatus(ns string) (string, error) {
 	ctx := context.Background()
-	var instances k8sclawv1alpha1.ClawInstanceList
-	var runs k8sclawv1alpha1.AgentRunList
-	var policies k8sclawv1alpha1.ClawPolicyList
+	var instances kubeclawv1alpha1.ClawInstanceList
+	var runs kubeclawv1alpha1.AgentRunList
+	var policies kubeclawv1alpha1.ClawPolicyList
 	_ = k8sClient.List(ctx, &instances, client.InNamespace(ns))
 	_ = k8sClient.List(ctx, &runs, client.InNamespace(ns))
 	_ = k8sClient.List(ctx, &policies, client.InNamespace(ns))
@@ -4099,7 +4099,7 @@ func tuiClusterStatus(ns string) (string, error) {
 
 func tuiListFeatures(ns, policyName string) (string, error) {
 	ctx := context.Background()
-	var pol k8sclawv1alpha1.ClawPolicy
+	var pol kubeclawv1alpha1.ClawPolicy
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: policyName, Namespace: ns}, &pol); err != nil {
 		return "", fmt.Errorf("policy %q not found: %w", policyName, err)
 	}
@@ -4122,25 +4122,25 @@ func tuiDelete(ns, resourceType, name string) (string, error) {
 	ctx := context.Background()
 	switch strings.ToLower(resourceType) {
 	case "instance", "inst":
-		obj := &k8sclawv1alpha1.ClawInstance{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		obj := &kubeclawv1alpha1.ClawInstance{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 		if err := k8sClient.Delete(ctx, obj); err != nil {
 			return "", fmt.Errorf("delete instance: %w", err)
 		}
 		return tuiSuccessStyle.Render(fmt.Sprintf("✓ Deleted instance: %s", name)), nil
 	case "run":
-		obj := &k8sclawv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		obj := &kubeclawv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 		if err := k8sClient.Delete(ctx, obj); err != nil {
 			return "", fmt.Errorf("delete run: %w", err)
 		}
 		return tuiSuccessStyle.Render(fmt.Sprintf("✓ Deleted run: %s", name)), nil
 	case "policy", "pol":
-		obj := &k8sclawv1alpha1.ClawPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		obj := &kubeclawv1alpha1.ClawPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 		if err := k8sClient.Delete(ctx, obj); err != nil {
 			return "", fmt.Errorf("delete policy: %w", err)
 		}
 		return tuiSuccessStyle.Render(fmt.Sprintf("✓ Deleted policy: %s", name)), nil
 	case "schedule", "sched":
-		obj := &k8sclawv1alpha1.ClawSchedule{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		obj := &kubeclawv1alpha1.ClawSchedule{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 		if err := k8sClient.Delete(ctx, obj); err != nil {
 			return "", fmt.Errorf("delete schedule: %w", err)
 		}
@@ -4152,7 +4152,7 @@ func tuiDelete(ns, resourceType, name string) (string, error) {
 
 func tuiAddChannel(ns, instanceName, chType, secretName string) (string, error) {
 	ctx := context.Background()
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: instanceName, Namespace: ns}, &inst); err != nil {
 		return "", fmt.Errorf("instance %q not found: %w", instanceName, err)
 	}
@@ -4164,9 +4164,9 @@ func tuiAddChannel(ns, instanceName, chType, secretName string) (string, error) 
 		}
 	}
 
-	inst.Spec.Channels = append(inst.Spec.Channels, k8sclawv1alpha1.ChannelSpec{
+	inst.Spec.Channels = append(inst.Spec.Channels, kubeclawv1alpha1.ChannelSpec{
 		Type: strings.ToLower(chType),
-		ConfigRef: k8sclawv1alpha1.SecretRef{
+		ConfigRef: kubeclawv1alpha1.SecretRef{
 			Secret: secretName,
 		},
 	})
@@ -4178,12 +4178,12 @@ func tuiAddChannel(ns, instanceName, chType, secretName string) (string, error) 
 
 func tuiRemoveChannel(ns, instanceName, chType string) (string, error) {
 	ctx := context.Background()
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: instanceName, Namespace: ns}, &inst); err != nil {
 		return "", fmt.Errorf("instance %q not found: %w", instanceName, err)
 	}
 
-	var newChannels []k8sclawv1alpha1.ChannelSpec
+	var newChannels []kubeclawv1alpha1.ChannelSpec
 	found := false
 	for _, ch := range inst.Spec.Channels {
 		if strings.EqualFold(ch.Type, chType) {
@@ -4205,7 +4205,7 @@ func tuiRemoveChannel(ns, instanceName, chType string) (string, error) {
 
 func tuiSetProvider(ns, instanceName, provider, model string) (string, error) {
 	ctx := context.Background()
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: instanceName, Namespace: ns}, &inst); err != nil {
 		return "", fmt.Errorf("instance %q not found: %w", instanceName, err)
 	}
@@ -4227,18 +4227,18 @@ func tuiCreateSchedule(ns, instanceName, cronExpr, task string) (string, error) 
 	ctx := context.Background()
 
 	// Verify instance exists.
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: instanceName, Namespace: ns}, &inst); err != nil {
 		return "", fmt.Errorf("instance %q not found: %w", instanceName, err)
 	}
 
 	name := fmt.Sprintf("%s-sched-%d", instanceName, time.Now().Unix())
-	sched := &k8sclawv1alpha1.ClawSchedule{
+	sched := &kubeclawv1alpha1.ClawSchedule{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 		},
-		Spec: k8sclawv1alpha1.ClawScheduleSpec{
+		Spec: kubeclawv1alpha1.ClawScheduleSpec{
 			InstanceRef:   instanceName,
 			Schedule:      cronExpr,
 			Task:          task,
@@ -4277,7 +4277,7 @@ func tuiShowMemory(ns, instanceName string) (string, error) {
 
 func tuiSetBaseURL(ns, instanceName, baseURL string) (string, error) {
 	ctx := context.Background()
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: instanceName, Namespace: ns}, &inst); err != nil {
 		return "", fmt.Errorf("instance %q not found: %w", instanceName, err)
 	}
@@ -4320,7 +4320,7 @@ func tuiPodLogs(ns, podName string) (string, error) {
 	parts := strings.Split(lines, "\n")
 	var filtered []string
 	for _, p := range parts {
-		if strings.Contains(p, "__K8SCLAW_RESULT__") || strings.Contains(p, "__K8SCLAW_END__") {
+		if strings.Contains(p, "__KUBECLAW_RESULT__") || strings.Contains(p, "__KUBECLAW_END__") {
 			continue
 		}
 		filtered = append(filtered, p)
@@ -4391,9 +4391,9 @@ func (m tuiModel) advanceWizard(val string) (tea.Model, tea.Cmd) {
 		// Auto step — verify CRDs are reachable.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		var instances k8sclawv1alpha1.ClawInstanceList
+		var instances kubeclawv1alpha1.ClawInstanceList
 		if err := k8sClient.List(ctx, &instances, client.InNamespace(m.namespace)); err != nil {
-			w.err = "CRDs not found — run 'k8sclaw install' first"
+			w.err = "CRDs not found — run 'kubeclaw install' first"
 			w.active = false
 			m.inputFocused = false
 			m.input.Blur()
@@ -4587,7 +4587,7 @@ func (m tuiModel) renderWizardPanel(h int) string {
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, titleStyle.Render("  ╔═══════════════════════════════════════════╗"))
-	lines = append(lines, titleStyle.Render("  ║         K8sClaw · Onboarding Wizard       ║"))
+	lines = append(lines, titleStyle.Render("  ║         KubeClaw · Onboarding Wizard       ║"))
 	lines = append(lines, titleStyle.Render("  ╚═══════════════════════════════════════════╝"))
 	lines = append(lines, "")
 
@@ -4792,24 +4792,24 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 
 	// 3. Apply default policy.
 	if w.applyPolicy {
-		pol := &k8sclawv1alpha1.ClawPolicy{
+		pol := &kubeclawv1alpha1.ClawPolicy{
 			ObjectMeta: metav1.ObjectMeta{Name: policyName, Namespace: ns},
-			Spec: k8sclawv1alpha1.ClawPolicySpec{
-				ToolGating: &k8sclawv1alpha1.ToolGatingSpec{
+			Spec: kubeclawv1alpha1.ClawPolicySpec{
+				ToolGating: &kubeclawv1alpha1.ToolGatingSpec{
 					DefaultAction: "allow",
-					Rules: []k8sclawv1alpha1.ToolGatingRule{
+					Rules: []kubeclawv1alpha1.ToolGatingRule{
 						{Tool: "exec_command", Action: "ask"},
 						{Tool: "write_file", Action: "allow"},
 						{Tool: "network_request", Action: "deny"},
 					},
 				},
-				SubagentPolicy: &k8sclawv1alpha1.SubagentPolicySpec{
+				SubagentPolicy: &kubeclawv1alpha1.SubagentPolicySpec{
 					MaxDepth:      3,
 					MaxConcurrent: 5,
 				},
-				SandboxPolicy: &k8sclawv1alpha1.SandboxPolicySpec{
+				SandboxPolicy: &kubeclawv1alpha1.SandboxPolicySpec{
 					Required:     false,
-					DefaultImage: "ghcr.io/alexsjones/k8sclaw/sandbox:latest",
+					DefaultImage: "ghcr.io/alexsjones/kubeclaw/sandbox:latest",
 					MaxCPU:       "4",
 					MaxMemory:    "8Gi",
 				},
@@ -4822,7 +4822,7 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 		}
 		if err := k8sClient.Create(ctx, pol); err != nil {
 			// If already exists, update it.
-			var existingPol k8sclawv1alpha1.ClawPolicy
+			var existingPol kubeclawv1alpha1.ClawPolicy
 			if getErr := k8sClient.Get(ctx, types.NamespacedName{Name: policyName, Namespace: ns}, &existingPol); getErr == nil {
 				existingPol.Spec = pol.Spec
 				if err2 := k8sClient.Update(ctx, &existingPol); err2 != nil {
@@ -4838,14 +4838,14 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 	}
 
 	// 4. Create ClawInstance.
-	inst := &k8sclawv1alpha1.ClawInstance{
+	inst := &kubeclawv1alpha1.ClawInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      w.instanceName,
 			Namespace: ns,
 		},
-		Spec: k8sclawv1alpha1.ClawInstanceSpec{
-			Agents: k8sclawv1alpha1.AgentsSpec{
-				Default: k8sclawv1alpha1.AgentConfig{
+		Spec: kubeclawv1alpha1.ClawInstanceSpec{
+			Agents: kubeclawv1alpha1.AgentsSpec{
+				Default: kubeclawv1alpha1.AgentConfig{
 					Model:   w.modelName,
 					BaseURL: w.baseURL,
 				},
@@ -4855,7 +4855,7 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 
 	// Only add AuthRefs when an API key was provided.
 	if w.apiKey != "" {
-		inst.Spec.AuthRefs = []k8sclawv1alpha1.SecretRef{
+		inst.Spec.AuthRefs = []kubeclawv1alpha1.SecretRef{
 			{
 				Secret: providerSecretName,
 			},
@@ -4863,10 +4863,10 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 	}
 
 	if w.channelType != "" {
-		inst.Spec.Channels = []k8sclawv1alpha1.ChannelSpec{
+		inst.Spec.Channels = []kubeclawv1alpha1.ChannelSpec{
 			{
 				Type: w.channelType,
-				ConfigRef: k8sclawv1alpha1.SecretRef{
+				ConfigRef: kubeclawv1alpha1.SecretRef{
 					Secret: channelSecretName,
 				},
 			},
@@ -4878,7 +4878,7 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 
 	// Try create; if it exists, update.
 	if err := k8sClient.Create(ctx, inst); err != nil {
-		var existing k8sclawv1alpha1.ClawInstance
+		var existing kubeclawv1alpha1.ClawInstance
 		if getErr := k8sClient.Get(ctx, types.NamespacedName{Name: w.instanceName, Namespace: ns}, &existing); getErr == nil {
 			existing.Spec = inst.Spec
 			if err2 := k8sClient.Update(ctx, &existing); err2 != nil {

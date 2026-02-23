@@ -1,4 +1,4 @@
-// Package apiserver provides the HTTP + WebSocket API server for K8sClaw.
+// Package apiserver provides the HTTP + WebSocket API server for KubeClaw.
 package apiserver
 
 import (
@@ -16,11 +16,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
-	"github.com/k8sclaw/k8sclaw/internal/eventbus"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
+	"github.com/kubeclaw/kubeclaw/internal/eventbus"
 )
 
-// Server is the K8sClaw API server.
+// Server is the KubeClaw API server.
 type Server struct {
 	client   client.Client
 	eventBus eventbus.EventBus
@@ -94,7 +94,7 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var list k8sclawv1alpha1.ClawInstanceList
+	var list kubeclawv1alpha1.ClawInstanceList
 	if err := s.client.List(r.Context(), &list, client.InNamespace(ns)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -110,7 +110,7 @@ func (s *Server) getInstance(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var inst k8sclawv1alpha1.ClawInstance
+	var inst kubeclawv1alpha1.ClawInstance
 	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: ns}, &inst); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -126,7 +126,7 @@ func (s *Server) deleteInstance(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	inst := &k8sclawv1alpha1.ClawInstance{
+	inst := &kubeclawv1alpha1.ClawInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 	}
 	if err := s.client.Delete(r.Context(), inst); err != nil {
@@ -145,7 +145,7 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var list k8sclawv1alpha1.AgentRunList
+	var list kubeclawv1alpha1.AgentRunList
 	if err := s.client.List(r.Context(), &list, client.InNamespace(ns)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -161,7 +161,7 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var run k8sclawv1alpha1.AgentRun
+	var run kubeclawv1alpha1.AgentRun
 	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: ns}, &run); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -207,12 +207,12 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		req.Timeout = "5m"
 	}
 
-	run := &k8sclawv1alpha1.AgentRun{
+	run := &kubeclawv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: req.InstanceRef + "-",
 			Namespace:    ns,
 		},
-		Spec: k8sclawv1alpha1.AgentRunSpec{
+		Spec: kubeclawv1alpha1.AgentRunSpec{
 			InstanceRef: req.InstanceRef,
 			AgentID:     req.AgentID,
 			SessionKey:  req.SessionKey,
@@ -221,7 +221,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Model != "" {
-		run.Spec.Model = k8sclawv1alpha1.ModelSpec{
+		run.Spec.Model = kubeclawv1alpha1.ModelSpec{
 			Model: req.Model,
 		}
 	}
@@ -243,7 +243,7 @@ func (s *Server) listPolicies(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var list k8sclawv1alpha1.ClawPolicyList
+	var list kubeclawv1alpha1.ClawPolicyList
 	if err := s.client.List(r.Context(), &list, client.InNamespace(ns)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -259,7 +259,7 @@ func (s *Server) getPolicy(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var pol k8sclawv1alpha1.ClawPolicy
+	var pol kubeclawv1alpha1.ClawPolicy
 	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: ns}, &pol); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -276,7 +276,7 @@ func (s *Server) listSkills(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var list k8sclawv1alpha1.SkillPackList
+	var list kubeclawv1alpha1.SkillPackList
 	if err := s.client.List(r.Context(), &list, client.InNamespace(ns)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -292,7 +292,7 @@ func (s *Server) getSkill(w http.ResponseWriter, r *http.Request) {
 		ns = "default"
 	}
 
-	var sk k8sclawv1alpha1.SkillPack
+	var sk kubeclawv1alpha1.SkillPack
 	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: ns}, &sk); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

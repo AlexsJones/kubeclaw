@@ -1,14 +1,14 @@
 #!/bin/sh
-# k8sclaw installer
-# Usage: curl -fsSL https://deploy.k8sclaw.ai/install.sh | sh
+# kubeclaw installer
+# Usage: curl -fsSL https://deploy.kubeclaw.ai/install.sh | sh
 #
-# Downloads the latest k8sclaw CLI release from GitHub and installs
+# Downloads the latest kubeclaw CLI release from GitHub and installs
 # the binary to /usr/local/bin (or ~/.local/bin if no sudo).
 
 set -e
 
-REPO="AlexsJones/k8sclaw"
-BINARY="k8sclaw"
+REPO="AlexsJones/kubeclaw"
+BINARY="kubeclaw"
 
 # --- helpers ---
 
@@ -105,11 +105,11 @@ install() {
 # --- main ---
 
 main() {
-    info "k8sclaw installer"
+    info "kubeclaw installer"
     detect_platform
     fetch_latest_tag
     install
-    info "Done! Run 'k8sclaw install' to deploy K8sClaw to your cluster."
+    info "Done! Run 'kubeclaw install' to deploy KubeClaw to your cluster."
 }
 
 main

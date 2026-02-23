@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: clawinstances.k8sclaw.io
+  name: clawinstances.kubeclaw.io
 spec:
-  group: k8sclaw.io
+  group: kubeclaw.io
   names:
     kind: ClawInstance
     listKind: ClawInstanceList

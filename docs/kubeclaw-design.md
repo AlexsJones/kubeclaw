@@ -1,4 +1,4 @@
-# K8sClaw Design Document
+# KubeClaw Design Document
 
 **Status:** Draft
 **Date:** 2026-02-23
@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-K8sClaw is a Kubernetes-native reimagining of OpenClaw that decomposes the
+KubeClaw is a Kubernetes-native reimagining of OpenClaw that decomposes the
 monolithic gateway into a multi-tenant, horizontally scalable system where
 **every sub-agent runs as an ephemeral Kubernetes pod** and
 **feature access is gated by Kubernetes-native policy** (admission controllers,
@@ -25,9 +25,9 @@ This draws on two prior-art systems:
   boundaries, and uses an external mount allowlist for security policy. Its
   architecture validates the "one container per agent invocation" model.
 
-K8sClaw takes the best of both:
+KubeClaw takes the best of both:
 
-| Concern | OpenClaw today | NanoClaw today | K8sClaw target |
+| Concern | OpenClaw today | NanoClaw today | KubeClaw target |
 |---------|---------------|----------------|----------------|
 | Agent execution | In-process (shared memory) | Ephemeral container per invocation | Ephemeral **K8s Pod** per invocation |
 | Sub-agent orchestration | In-process registry + lane queue | N/A (flat) | **CRD-based** registry with controller reconciliation |
@@ -55,7 +55,7 @@ K8sClaw takes the best of both:
          │                  │                  │
          ▼                  ▼                  ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
-  │                     K8sClaw Control Plane (Deployment, HPA)            │
+  │                     KubeClaw Control Plane (Deployment, HPA)            │
   │                                                                        │
   │   ┌──────────────┐  ┌────────────────┐  ┌──────────────────────────┐  │
   │   │  API Server   │  │  Agent         │  │  Session Manager         │  │
@@ -112,11 +112,11 @@ Replaces the monolithic gateway. Each user or tenant gets a `ClawInstance` that
 declares their desired channels, agents, and policy bindings.
 
 ```yaml
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: ClawInstance
 metadata:
   name: alice
-  namespace: k8sclaw
+  namespace: kubeclaw
 spec:
   # Which channels this instance connects to
   channels:
@@ -182,18 +182,18 @@ NanoClaw's ephemeral container model — but with K8s lifecycle management inste
 of `docker run --rm`.
 
 ```yaml
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: AgentRun
 metadata:
   name: run-abc123
-  namespace: k8sclaw
+  namespace: kubeclaw
   labels:
-    k8sclaw.io/instance: alice
-    k8sclaw.io/agent-id: default
-    k8sclaw.io/session-key: "agent:default:subagent:xyz"
-    k8sclaw.io/parent-run: run-parent-456   # populated for sub-agents
+    kubeclaw.io/instance: alice
+    kubeclaw.io/agent-id: default
+    kubeclaw.io/session-key: "agent:default:subagent:xyz"
+    kubeclaw.io/parent-run: run-parent-456   # populated for sub-agents
   ownerReferences:
-    - apiVersion: k8sclaw.io/v1alpha1
+    - apiVersion: kubeclaw.io/v1alpha1
       kind: ClawInstance
       name: alice
 spec:
@@ -260,11 +260,11 @@ Draws from NanoClaw's external mount-allowlist concept (policy stored outside
 the agent's reach) but extends it to cover all capabilities.
 
 ```yaml
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: ClawPolicy
 metadata:
   name: standard-user-policy
-  namespace: k8sclaw
+  namespace: kubeclaw
 spec:
   # Tool-level gating
   tools:
@@ -365,15 +365,15 @@ spec:
 
 ### 3.4 `SkillPack` — portable skill bundles
 
-Skills are currently Markdown files on disk. In K8sClaw they become a CRD that
+Skills are currently Markdown files on disk. In KubeClaw they become a CRD that
 produces ConfigMaps mounted into agent pods.
 
 ```yaml
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: SkillPack
 metadata:
   name: coding-skills
-  namespace: k8sclaw
+  namespace: kubeclaw
 spec:
   skills:
     - name: code-review
@@ -466,18 +466,18 @@ kind: Job
 metadata:
   name: run-abc123
   labels:
-    k8sclaw.io/agent-run: run-abc123
-    k8sclaw.io/instance: alice
+    kubeclaw.io/agent-run: run-abc123
+    kubeclaw.io/instance: alice
 spec:
   ttlSecondsAfterFinished: 300
   activeDeadlineSeconds: 600
   template:
     metadata:
       labels:
-        k8sclaw.io/agent-run: run-abc123
+        kubeclaw.io/agent-run: run-abc123
     spec:
       restartPolicy: Never
-      serviceAccountName: k8sclaw-agent   # minimal RBAC, no cluster access
+      serviceAccountName: kubeclaw-agent   # minimal RBAC, no cluster access
 
       securityContext:
         runAsNonRoot: true
@@ -527,7 +527,7 @@ spec:
             - name: AGENT_RUN_ID
               value: run-abc123
             - name: EVENT_BUS_URL
-              value: nats://nats.k8sclaw:4222
+              value: nats://nats.kubeclaw:4222
           volumeMounts:
             - name: ipc
               mountPath: /ipc
@@ -588,7 +588,7 @@ spec:
 The IPC bridge sits between the ephemeral agent pod and the durable control
 plane. It replaces three current mechanisms:
 
-| Current (OpenClaw) | Current (NanoClaw) | K8sClaw IPC Bridge |
+| Current (OpenClaw) | Current (NanoClaw) | KubeClaw IPC Bridge |
 |---|---|---|
 | In-process EventEmitter | Filesystem polling (`setInterval`) | Sidecar with fswatch + event bus |
 | Gateway RPC (`callGateway`) | JSON file drop in `/ipc/messages/` | gRPC to control plane via NATS |
@@ -629,16 +629,16 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: channel-telegram-alice
-  namespace: k8sclaw
+  namespace: kubeclaw
   labels:
-    k8sclaw.io/instance: alice
-    k8sclaw.io/channel: telegram
+    kubeclaw.io/instance: alice
+    kubeclaw.io/channel: telegram
 spec:
   replicas: 1
   selector:
     matchLabels:
-      k8sclaw.io/instance: alice
-      k8sclaw.io/channel: telegram
+      kubeclaw.io/instance: alice
+      kubeclaw.io/channel: telegram
   template:
     spec:
       containers:
@@ -648,7 +648,7 @@ spec:
             - name: INSTANCE_NAME
               value: alice
             - name: EVENT_BUS_URL
-              value: nats://nats.k8sclaw:4222
+              value: nats://nats.kubeclaw:4222
           envFrom:
             - secretRef:
                 name: alice-telegram-creds
@@ -690,10 +690,10 @@ components:
 
 ## 5. Admission Control & Policy Enforcement
 
-### 5.1 Admission Webhook: `k8sclaw-policy-enforcer`
+### 5.1 Admission Webhook: `kubeclaw-policy-enforcer`
 
 A validating + mutating admission webhook intercepts all pod creation requests
-with the `k8sclaw.io/agent-run` label and enforces `ClawPolicy`:
+with the `kubeclaw.io/agent-run` label and enforces `ClawPolicy`:
 
 **Validation (reject if violated):**
 
@@ -711,7 +711,7 @@ with the `k8sclaw.io/agent-run` label and enforces `ClawPolicy`:
 6. **Mount validation** — validate all `volumeMounts` against
    `ClawPolicy.mounts.blockedPatterns`. Reject mounts to `.ssh`, `.kube`, etc.
    This is the K8s-native equivalent of NanoClaw's `validateAdditionalMounts()`.
-7. **Sub-agent depth** — check the `k8sclaw.io/spawn-depth` annotation against
+7. **Sub-agent depth** — check the `kubeclaw.io/spawn-depth` annotation against
    `ClawPolicy.subagents.maxDepth`. Reject if exceeded.
 8. **Concurrency** — count existing `AgentRun` CRs with status `Running` for
    this instance. Reject if `maxConcurrent` exceeded.
@@ -726,11 +726,11 @@ with the `k8sclaw.io/agent-run` label and enforces `ClawPolicy`:
 
 ### 5.2 OPA/Gatekeeper Constraints (declarative)
 
-For cluster-wide policy enforcement beyond K8sClaw's own webhook:
+For cluster-wide policy enforcement beyond KubeClaw's own webhook:
 
 ```yaml
 apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sClawSandboxRequired
+kind: KubeClawSandboxRequired
 metadata:
   name: require-sandbox-all-agents
 spec:
@@ -738,10 +738,10 @@ spec:
     kinds:
       - apiGroups: ["batch"]
         kinds: ["Job"]
-    namespaces: ["k8sclaw"]
+    namespaces: ["kubeclaw"]
     labelSelector:
       matchLabels:
-        k8sclaw.io/component: agent-run
+        kubeclaw.io/component: agent-run
   parameters:
     requiredContainers: ["sandbox"]
     requiredSecurityContext:
@@ -761,12 +761,12 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: agent-network-deny-all
-  namespace: k8sclaw
+  namespace: kubeclaw
 spec:
   podSelector:
     matchLabels:
-      k8sclaw.io/component: agent-run
-      k8sclaw.io/network-policy: none
+      kubeclaw.io/component: agent-run
+      kubeclaw.io/network-policy: none
   policyTypes: [Ingress, Egress]
   # Empty ingress/egress = deny all
   egress:
@@ -794,8 +794,8 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      k8sclaw.io/component: agent-run
-      k8sclaw.io/network-policy: restricted
+      kubeclaw.io/component: agent-run
+      kubeclaw.io/network-policy: restricted
   policyTypes: [Ingress, Egress]
   egress:
     - to:
@@ -834,8 +834,8 @@ declared in `ClawPolicy.featureGates` and enforced at multiple levels:
 kubectl patch clawpolicy standard-user-policy --type merge \
   -p '{"spec":{"featureGates":{"browser-automation": true}}}'
 
-# Via K8sClaw CLI (wrapper)
-k8sclaw features enable browser-automation --instance alice
+# Via KubeClaw CLI (wrapper)
+kubeclaw features enable browser-automation --instance alice
 
 # Via the chat interface (admin channel)
 # User: "@claw enable browser automation"
@@ -896,7 +896,7 @@ CREATE INDEX ON memory_embeddings
 
 `openclaw.json` is decomposed:
 
-| Config section | K8sClaw equivalent |
+| Config section | KubeClaw equivalent |
 |---|---|
 | `gateway.auth` | K8s Secret + Ingress auth |
 | `gateway.mode`, `gateway.port` | Service + Ingress spec |
@@ -914,7 +914,7 @@ CREATE INDEX ON memory_embeddings
 Session transcripts (append-only JSONL) move to MinIO/S3:
 
 ```
-s3://k8sclaw-transcripts/{instance}/{agentId}/{sessionKey}/{timestamp}.jsonl
+s3://kubeclaw-transcripts/{instance}/{agentId}/{sessionKey}/{timestamp}.jsonl
 ```
 
 Agent pods write transcript events to the IPC volume; the IPC bridge flushes
@@ -927,7 +927,7 @@ them to object storage in batches.
 ### Phase 1: Operator + CRDs (foundations)
 
 - Implement CRDs: `ClawInstance`, `AgentRun`, `ClawPolicy`, `SkillPack`
-- Build the K8sClaw operator (controller-runtime based)
+- Build the KubeClaw operator (controller-runtime based)
 - `ClawInstance` controller: reconcile channel pods + store config
 - `AgentRun` controller: create Jobs, watch completion, deliver results
 - Agent pod image: minimal Node.js runner that reads task from `/ipc/input/`,
@@ -967,9 +967,9 @@ them to object storage in batches.
 
 ---
 
-## 8. Comparison: OpenClaw Concepts → K8sClaw Primitives
+## 8. Comparison: OpenClaw Concepts → KubeClaw Primitives
 
-| OpenClaw concept | Code location | K8sClaw equivalent |
+| OpenClaw concept | Code location | KubeClaw equivalent |
 |---|---|---|
 | `startGatewayServer()` | `src/gateway/server.impl.ts` | **Control plane Deployment** (API + orchestrator) |
 | `SubagentRunRecord` | `src/agents/subagent-registry.types.ts` | **`AgentRun` CRD** |
@@ -991,7 +991,7 @@ them to object storage in batches.
 | Tailscale exposure | `src/gateway/server-tailscale.ts` | **K8s Ingress** |
 | Gateway health | `src/gateway/server/health-state.ts` | K8s **liveness/readiness probes** + Prometheus metrics |
 
-| NanoClaw concept | Code location | K8sClaw equivalent |
+| NanoClaw concept | Code location | KubeClaw equivalent |
 |---|---|---|
 | `runContainerAgent()` | `src/container-runner.ts` | Orchestrator creates K8s Job from `AgentRun` spec |
 | Container args builder | `buildContainerArgs()` | Pod spec builder in orchestrator |
@@ -1011,13 +1011,13 @@ them to object storage in batches.
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                          CLUSTER-LEVEL POLICY                            │
 │  • PodSecurity (restricted profile)                                      │
-│  • NetworkPolicy (default deny for k8sclaw namespace)                    │
+│  • NetworkPolicy (default deny for kubeclaw namespace)                    │
 │  • OPA/Gatekeeper constraints (global guardrails)                        │
 │  • RBAC (agent ServiceAccount has zero cluster permissions)              │
 └────────────────────────────────────────┬──────────────────────────────────┘
                                          │
 ┌────────────────────────────────────────▼──────────────────────────────────┐
-│                        K8SCLAW ADMISSION WEBHOOK                         │
+│                        KUBECLAW ADMISSION WEBHOOK                         │
 │  • Validates every agent pod against ClawPolicy                          │
 │  • Enforces feature gates, mount blocklists, resource limits             │
 │  • Injects NetworkPolicy labels, security contexts, sidecars            │
@@ -1057,11 +1057,11 @@ them to object storage in batches.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: k8sclaw-control-plane
+  name: kubeclaw-control-plane
 spec:
   selector:
     matchLabels:
-      app: k8sclaw-control-plane
+      app: kubeclaw-control-plane
   endpoints:
     - port: metrics
       path: /metrics
@@ -1071,16 +1071,16 @@ spec:
 
 | Metric | Type | Description |
 |---|---|---|
-| `k8sclaw_agent_runs_total` | Counter | Total agent runs (by instance, status) |
-| `k8sclaw_agent_run_duration_seconds` | Histogram | Agent run duration |
-| `k8sclaw_agent_runs_active` | Gauge | Currently running agent pods |
-| `k8sclaw_subagent_spawns_total` | Counter | Sub-agent spawn requests |
-| `k8sclaw_subagent_depth` | Histogram | Sub-agent nesting depth distribution |
-| `k8sclaw_tool_calls_total` | Counter | Tool invocations (by tool name, status) |
-| `k8sclaw_tool_policy_denials_total` | Counter | Policy-denied tool calls |
-| `k8sclaw_channel_messages_total` | Counter | Messages in/out per channel |
-| `k8sclaw_channel_health` | Gauge | Channel connection status (0/1) |
-| `k8sclaw_admission_decisions_total` | Counter | Webhook admit/reject counts |
+| `kubeclaw_agent_runs_total` | Counter | Total agent runs (by instance, status) |
+| `kubeclaw_agent_run_duration_seconds` | Histogram | Agent run duration |
+| `kubeclaw_agent_runs_active` | Gauge | Currently running agent pods |
+| `kubeclaw_subagent_spawns_total` | Counter | Sub-agent spawn requests |
+| `kubeclaw_subagent_depth` | Histogram | Sub-agent nesting depth distribution |
+| `kubeclaw_tool_calls_total` | Counter | Tool invocations (by tool name, status) |
+| `kubeclaw_tool_policy_denials_total` | Counter | Policy-denied tool calls |
+| `kubeclaw_channel_messages_total` | Counter | Messages in/out per channel |
+| `kubeclaw_channel_health` | Gauge | Channel connection status (0/1) |
+| `kubeclaw_admission_decisions_total` | Counter | Webhook admit/reject counts |
 
 ---
 
@@ -1102,7 +1102,7 @@ spec:
    latency. Alternatively, use Kata Containers or Firecracker for faster
    microVM boot.
 
-4. **Multi-cluster** — should K8sClaw support agents running across clusters?
+4. **Multi-cluster** — should KubeClaw support agents running across clusters?
    The event bus (NATS) supports multi-cluster natively, but CRDs are
    cluster-scoped.
 

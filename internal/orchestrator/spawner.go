@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
 // Spawner handles sub-agent spawn requests by creating AgentRun CRs.
@@ -46,10 +46,10 @@ type SpawnRequest struct {
 	CurrentDepth int `json:"currentDepth"`
 
 	// Model configuration.
-	Model k8sclawv1alpha1.ModelSpec `json:"model"`
+	Model kubeclawv1alpha1.ModelSpec `json:"model"`
 
 	// Skills to mount.
-	Skills []k8sclawv1alpha1.SkillRef `json:"skills,omitempty"`
+	Skills []kubeclawv1alpha1.SkillRef `json:"skills,omitempty"`
 }
 
 // SpawnResult is the result of a spawn operation.
@@ -74,22 +74,22 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) (*SpawnResult, er
 
 	log.Info("Spawning sub-agent", "runName", runName)
 
-	agentRun := &k8sclawv1alpha1.AgentRun{
+	agentRun := &kubeclawv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      runName,
 			Namespace: req.Namespace,
 			Labels: map[string]string{
-				"k8sclaw.io/instance":   req.InstanceName,
-				"k8sclaw.io/agent-id":   req.AgentID,
-				"k8sclaw.io/parent-run": req.ParentRunName,
-				"k8sclaw.io/component":  "agent-run",
+				"kubeclaw.io/instance":   req.InstanceName,
+				"kubeclaw.io/agent-id":   req.AgentID,
+				"kubeclaw.io/parent-run": req.ParentRunName,
+				"kubeclaw.io/component":  "agent-run",
 			},
 		},
-		Spec: k8sclawv1alpha1.AgentRunSpec{
+		Spec: kubeclawv1alpha1.AgentRunSpec{
 			InstanceRef: req.InstanceName,
 			AgentID:     req.AgentID,
 			SessionKey:  sessionKey,
-			Parent: &k8sclawv1alpha1.ParentRunRef{
+			Parent: &kubeclawv1alpha1.ParentRunRef{
 				RunName:    req.ParentRunName,
 				SessionKey: req.ParentSessionKey,
 				SpawnDepth: req.CurrentDepth + 1,

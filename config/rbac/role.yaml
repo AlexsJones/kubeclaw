@@ -2,30 +2,30 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: k8sclaw-controller-manager
-  namespace: k8sclaw-system
+  name: kubeclaw-controller-manager
+  namespace: kubeclaw-system
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
     app.kubernetes.io/component: controller
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: k8sclaw-apiserver
-  namespace: k8sclaw-system
+  name: kubeclaw-apiserver
+  namespace: kubeclaw-system
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
     app.kubernetes.io/component: apiserver
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: k8sclaw-manager-role
+  name: kubeclaw-manager-role
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
 rules:
   # CRDs
-  - apiGroups: ["k8sclaw.io"]
+  - apiGroups: ["kubeclaw.io"]
     resources:
       - clawinstances
       - agentruns
@@ -33,7 +33,7 @@ rules:
       - skillpacks
       - clawschedules
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["k8sclaw.io"]
+  - apiGroups: ["kubeclaw.io"]
     resources:
       - clawinstances/status
       - agentruns/status
@@ -41,7 +41,7 @@ rules:
       - skillpacks/status
       - clawschedules/status
     verbs: ["get", "update", "patch"]
-  - apiGroups: ["k8sclaw.io"]
+  - apiGroups: ["kubeclaw.io"]
     resources:
       - clawinstances/finalizers
       - agentruns/finalizers
@@ -76,32 +76,32 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: k8sclaw-manager-rolebinding
+  name: kubeclaw-manager-rolebinding
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: k8sclaw-manager-role
+  name: kubeclaw-manager-role
 subjects:
   - kind: ServiceAccount
-    name: k8sclaw-controller-manager
-    namespace: k8sclaw-system
+    name: kubeclaw-controller-manager
+    namespace: kubeclaw-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: k8sclaw-apiserver-rolebinding
+  name: kubeclaw-apiserver-rolebinding
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: k8sclaw-manager-role
+  name: kubeclaw-manager-role
 subjects:
   - kind: ServiceAccount
-    name: k8sclaw-apiserver
-    namespace: k8sclaw-system
+    name: kubeclaw-apiserver
+    namespace: kubeclaw-system
 ---
 # ServiceAccount for agent pods (created in the workload namespace).
 # The controller creates Jobs that reference this SA. It needs minimal
@@ -110,7 +110,7 @@ subjects:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: k8sclaw-agent
+  name: kubeclaw-agent
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
     app.kubernetes.io/component: agent

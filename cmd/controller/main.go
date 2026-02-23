@@ -1,4 +1,4 @@
-// Package main is the entry point for the K8sClaw controller manager.
+// Package main is the entry point for the KubeClaw controller manager.
 // It starts all CRD controllers: ClawInstance, AgentRun, ClawPolicy, SkillPack.
 package main
 
@@ -15,9 +15,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
-	"github.com/k8sclaw/k8sclaw/internal/controller"
-	"github.com/k8sclaw/k8sclaw/internal/orchestrator"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
+	"github.com/kubeclaw/kubeclaw/internal/controller"
+	"github.com/kubeclaw/kubeclaw/internal/orchestrator"
 )
 
 var (
@@ -27,7 +27,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(k8sclawv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kubeclawv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 		},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "k8sclaw-controller-leader",
+		LeaderElectionID:       "kubeclaw-controller-leader",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -126,7 +126,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting K8sClaw controller manager")
+	setupLog.Info("starting KubeClaw controller manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

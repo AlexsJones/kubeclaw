@@ -1,32 +1,32 @@
-# K8sClaw
+# KubeClaw
 
 <p align="center">
-  <img src="icon.svg" alt="k8sclaw icon" width="128" height="128">
+  <img src="icon.svg" alt="kubeclaw icon" width="128" height="128">
 </p>
 
 <p align="center">
   <strong>The Kubernetes-Native Agentic Control Plane</strong><br>
-  <em>What OpenClaw does in-process, K8sClaw does with Kubernetes primitives.<br>
+  <em>What OpenClaw does in-process, KubeClaw does with Kubernetes primitives.<br>
   Every agent is an ephemeral Pod. Every policy is a CRD. Every execution is a Job.<br>
   Multi-tenant, horizontally scalable, and cloud-native from the ground up.</em><br><br>
   From the creator of <a href="https://github.com/k8sgpt-ai/k8sgpt">k8sgpt</a> and <a href="https://github.com/AlexsJones/llmfit">llmfit</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/AlexsJones/k8sclaw/actions"><img src="https://github.com/AlexsJones/k8sclaw/actions/workflows/build.yaml/badge.svg" alt="Build"></a>
-  <a href="https://github.com/AlexsJones/k8sclaw/releases/latest"><img src="https://img.shields.io/github/v/release/AlexsJones/k8sclaw" alt="Release"></a>
+  <a href="https://github.com/AlexsJones/kubeclaw/actions"><img src="https://github.com/AlexsJones/kubeclaw/actions/workflows/build.yaml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/AlexsJones/kubeclaw/releases/latest"><img src="https://img.shields.io/github/v/release/AlexsJones/kubeclaw" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
 </p>
 
 ---
 
-## Why K8sClaw?
+## Why KubeClaw?
 
 Agentic frameworks like OpenClaw pioneered rich agent orchestration — sub-agent registries, tool pipelines, channel integrations, and sandbox execution. But they run as **in-process monoliths** with file-based state, single-instance locks, and tightly coupled plugin systems.
 
-K8sClaw takes the same agentic control model and rebuilds it on Kubernetes primitives:
+KubeClaw takes the same agentic control model and rebuilds it on Kubernetes primitives:
 
-| Concern | OpenClaw (in-process) | K8sClaw (Kubernetes-native) |
+| Concern | OpenClaw (in-process) | KubeClaw (Kubernetes-native) |
 |---------|----------------------|----------------------------|
 | **Agent execution** | Shared memory, single process | Ephemeral **Pod** per invocation (K8s Job) |
 | **Orchestration** | In-process registry + lane queue | **CRD-based** registry with controller reconciliation |
@@ -41,23 +41,23 @@ K8sClaw takes the same agentic control model and rebuilds it on Kubernetes primi
 | **Channel connections** | In-process per channel | Dedicated **Deployment** per channel type |
 | **Observability** | Application logs | `kubectl logs`, events, conditions, **k9s-style TUI** |
 
-The result: every concept that OpenClaw manages in application code, K8sClaw expresses as a Kubernetes resource — declarative, reconcilable, observable, and scalable.
+The result: every concept that OpenClaw manages in application code, KubeClaw expresses as a Kubernetes resource — declarative, reconcilable, observable, and scalable.
 
 ---
 
 ### Quick Install (macOS / Linux)
 
 ```bash
-curl -fsSL https://deploy.k8sclaw.ai/install.sh | sh
+curl -fsSL https://deploy.kubeclaw.ai/install.sh | sh
 ```
 
 ### Deploy to Your Cluster
 
 ```bash
-k8sclaw install          # CRDs, controllers, webhook, NATS, RBAC, network policies
-k8sclaw onboard          # interactive setup wizard — instance, provider, channel
-k8sclaw                  # launch the interactive TUI (default command)
-k8sclaw uninstall        # clean removal
+kubeclaw install          # CRDs, controllers, webhook, NATS, RBAC, network policies
+kubeclaw onboard          # interactive setup wizard — instance, provider, channel
+kubeclaw                  # launch the interactive TUI (default command)
+kubeclaw uninstall        # clean removal
 ```
 
 ## Architecture
@@ -115,7 +115,7 @@ graph TB
     end
 
     USER(["User / Chat Client"]) -- "Telegram · Slack<br/>Discord · WhatsApp" --> CH
-    ADMIN(["Operator / SRE"]) -- "k8sclaw TUI<br/>kubectl · k9s" --> CP
+    ADMIN(["Operator / SRE"]) -- "kubeclaw TUI<br/>kubectl · k9s" --> CP
 
     style K8S fill:#0d1117,stroke:#30363d,color:#c9d1d9
     style CP fill:#1a1a2e,stroke:#e94560,color:#fff
@@ -139,7 +139,7 @@ graph TB
 
 ## Custom Resources
 
-K8sClaw models every agentic concept as a Kubernetes Custom Resource:
+KubeClaw models every agentic concept as a Kubernetes Custom Resource:
 
 | CRD | Kubernetes Analogy | Purpose |
 |-----|--------------------|---------|
@@ -163,7 +163,7 @@ This gives agents **continuity across runs** without external databases or file 
 `ClawSchedule` resources define cron-based recurring agent runs — the Kubernetes-native equivalent of OpenClaw's heartbeat system:
 
 ```yaml
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: ClawSchedule
 metadata:
   name: daily-standup
@@ -180,7 +180,7 @@ Concurrency policies (`Forbid`, `Allow`, `Replace`) work like `CronJob.spec.conc
 
 ## Interactive TUI
 
-Running `k8sclaw` with no arguments launches a **k9s-style interactive terminal UI** for full cluster-wide agentic management.
+Running `kubeclaw` with no arguments launches a **k9s-style interactive terminal UI** for full cluster-wide agentic management.
 
 ### Views
 
@@ -191,7 +191,7 @@ Running `k8sclaw` with no arguments launches a **k9s-style interactive terminal 
 | `3` | Policies | ClawPolicy list with feature gates |
 | `4` | Skills | SkillPack list with file counts |
 | `5` | Channels | Channel pod status (Telegram, Slack, Discord, WhatsApp) |
-| `6` | Pods | All k8sclaw pods with status and restarts |
+| `6` | Pods | All kubeclaw pods with status and restarts |
 | `7` | Schedules | ClawSchedule list with cron, type, phase, run count |
 
 ### Keybindings
@@ -221,7 +221,7 @@ Running `k8sclaw` with no arguments launches a **k9s-style interactive terminal 
 ### 1. Install the CLI
 
 ```bash
-curl -fsSL https://deploy.k8sclaw.ai/install.sh | sh
+curl -fsSL https://deploy.kubeclaw.ai/install.sh | sh
 ```
 
 Detects your OS and architecture, downloads the latest release binary, and installs to `/usr/local/bin` (or `~/.local/bin`).
@@ -229,26 +229,26 @@ Detects your OS and architecture, downloads the latest release binary, and insta
 ### 2. Deploy to your cluster
 
 ```bash
-k8sclaw install
+kubeclaw install
 ```
 
 Applies CRDs, RBAC, controller manager, API server, admission webhook, NATS event bus, cert-manager (if not present), and network policies to your current kubectl context.
 
 ```bash
-k8sclaw install --version v0.0.13   # specific version
+kubeclaw install --version v0.0.13   # specific version
 ```
 
 ### 3. Onboard — interactive setup wizard
 
 ```bash
-k8sclaw onboard
+kubeclaw onboard
 ```
 
 The wizard walks you through five steps:
 
 ```
   ╔═══════════════════════════════════════════╗
-  ║         K8sClaw · Onboarding Wizard       ║
+  ║         KubeClaw · Onboarding Wizard       ║
   ╚═══════════════════════════════════════════╝
 
   Step 1/5 — Cluster check
@@ -268,31 +268,31 @@ The wizard walks you through five steps:
 | Ollama | `http://ollama:11434/v1` | none |
 | Any OpenAI-compatible | custom URL | custom |
 
-### 4. Launch K8sClaw
+### 4. Launch KubeClaw
 
 ```bash
-k8sclaw
+kubeclaw
 ```
 
 The interactive TUI gives you full visibility — browse instances, runs, schedules, and channels; view logs and describe output inline; submit agent runs with `/run <task>`; check memory with `/memory <instance>`.
 
 ```bash
-k8sclaw instances list                              # list instances
-k8sclaw runs list                                   # list agent runs
-k8sclaw features enable browser-automation \
+kubeclaw instances list                              # list instances
+kubeclaw runs list                                   # list agent runs
+kubeclaw features enable browser-automation \
   --policy default-policy                           # enable a feature gate
 ```
 
-### 5. Remove K8sClaw
+### 5. Remove KubeClaw
 
 ```bash
-k8sclaw uninstall
+kubeclaw uninstall
 ```
 
 ## Project Structure
 
 ```
-k8sclaw/
+kubeclaw/
 ├── api/v1alpha1/           # CRD type definitions (ClawInstance, AgentRun, ClawPolicy, SkillPack, ClawSchedule)
 ├── cmd/                    # Binary entry points
 │   ├── agent-runner/       # LLM agent runner (runs inside agent pods)
@@ -300,7 +300,7 @@ k8sclaw/
 │   ├── apiserver/          # HTTP + WebSocket API server
 │   ├── ipc-bridge/         # IPC bridge sidecar (fsnotify → NATS)
 │   ├── webhook/            # Admission webhook (policy enforcement)
-│   └── k8sclaw/            # CLI + interactive TUI
+│   └── kubeclaw/            # CLI + interactive TUI
 ├── internal/               # Internal packages
 │   ├── controller/         # Kubernetes controllers (5 reconcilers)
 │   ├── orchestrator/       # Agent pod builder & spawner

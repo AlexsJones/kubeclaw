@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 env:
-  REGISTRY: ghcr.io/alexsjones/k8sclaw
+  REGISTRY: ghcr.io/alexsjones/kubeclaw
 
 jobs:
   release-cli:
@@ -43,20 +43,20 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           go build -ldflags="-s -w -X main.version=${VERSION}" \
-            -o k8sclaw ./cmd/k8sclaw
+            -o kubeclaw ./cmd/kubeclaw
 
       - name: Package
         run: |
           PLATFORM="${{ matrix.goos }}-${{ matrix.goarch }}"
-          tar -czf "k8sclaw-${PLATFORM}.tar.gz" k8sclaw
-          sha256sum "k8sclaw-${PLATFORM}.tar.gz" > "k8sclaw-${PLATFORM}.tar.gz.sha256"
+          tar -czf "kubeclaw-${PLATFORM}.tar.gz" kubeclaw
+          sha256sum "kubeclaw-${PLATFORM}.tar.gz" > "kubeclaw-${PLATFORM}.tar.gz.sha256"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            k8sclaw-*.tar.gz
-            k8sclaw-*.sha256
+            kubeclaw-*.tar.gz
+            kubeclaw-*.sha256
 
   release-manifests:
     runs-on: ubuntu-latest
@@ -65,7 +65,7 @@ jobs:
 
       - name: Package install manifests
         run: |
-          tar -czf k8sclaw-manifests.tar.gz \
+          tar -czf kubeclaw-manifests.tar.gz \
             config/crd/bases/ \
             config/manager/ \
             config/rbac/ \
@@ -77,7 +77,7 @@ jobs:
       - name: Upload manifests
         uses: softprops/action-gh-release@v2
         with:
-          files: k8sclaw-manifests.tar.gz
+          files: kubeclaw-manifests.tar.gz
 
   release-images:
     runs-on: ubuntu-latest

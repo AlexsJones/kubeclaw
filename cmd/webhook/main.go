@@ -1,4 +1,4 @@
-// Package main is the entry point for the K8sClaw admission webhook server.
+// Package main is the entry point for the KubeClaw admission webhook server.
 package main
 
 import (
@@ -13,15 +13,15 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	ctrlwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
-	"github.com/k8sclaw/k8sclaw/internal/webhook"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
+	"github.com/kubeclaw/kubeclaw/internal/webhook"
 )
 
 var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(k8sclawv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kubeclawv1alpha1.AddToScheme(scheme))
 }
 
 func main() {

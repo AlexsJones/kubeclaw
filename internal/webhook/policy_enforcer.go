@@ -1,4 +1,4 @@
-// Package webhook provides validating and mutating admission webhooks for K8sClaw.
+// Package webhook provides validating and mutating admission webhooks for KubeClaw.
 // These enforce ClawPolicy constraints on AgentRun resources.
 package webhook
 
@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
 // PolicyEnforcer is a validating webhook that enforces ClawPolicy on AgentRuns.
@@ -28,13 +28,13 @@ type PolicyEnforcer struct {
 
 // Handle validates AgentRun creation/updates against the bound ClawPolicy.
 func (pe *PolicyEnforcer) Handle(ctx context.Context, req admission.Request) admission.Response {
-	run := &k8sclawv1alpha1.AgentRun{}
+	run := &kubeclawv1alpha1.AgentRun{}
 	if err := pe.decoder.Decode(req, run); err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
 	// Look up the owning ClawInstance
-	var instance k8sclawv1alpha1.ClawInstance
+	var instance kubeclawv1alpha1.ClawInstance
 	if err := pe.Client.Get(ctx, types.NamespacedName{
 		Name:      run.Spec.InstanceRef,
 		Namespace: run.Namespace,
@@ -49,7 +49,7 @@ func (pe *PolicyEnforcer) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// Look up the ClawPolicy
-	var policy k8sclawv1alpha1.ClawPolicy
+	var policy kubeclawv1alpha1.ClawPolicy
 	if err := pe.Client.Get(ctx, types.NamespacedName{
 		Name:      instance.Spec.PolicyRef,
 		Namespace: run.Namespace,
@@ -88,7 +88,7 @@ func (pe *PolicyEnforcer) Handle(ctx context.Context, req admission.Request) adm
 	return admission.Allowed("policy validated")
 }
 
-func (pe *PolicyEnforcer) validateResources(run *k8sclawv1alpha1.AgentRun, policy *k8sclawv1alpha1.ClawPolicy) error {
+func (pe *PolicyEnforcer) validateResources(run *kubeclawv1alpha1.AgentRun, policy *kubeclawv1alpha1.ClawPolicy) error {
 	if policy.Spec.SandboxPolicy == nil || run.Spec.Sandbox == nil {
 		return nil
 	}
@@ -106,7 +106,7 @@ func (pe *PolicyEnforcer) validateResources(run *k8sclawv1alpha1.AgentRun, polic
 	return nil
 }
 
-func (pe *PolicyEnforcer) validateSubagentDepth(run *k8sclawv1alpha1.AgentRun, policy *k8sclawv1alpha1.ClawPolicy) error {
+func (pe *PolicyEnforcer) validateSubagentDepth(run *kubeclawv1alpha1.AgentRun, policy *kubeclawv1alpha1.ClawPolicy) error {
 	if policy.Spec.SubagentPolicy == nil || run.Spec.Parent == nil {
 		return nil
 	}
@@ -119,7 +119,7 @@ func (pe *PolicyEnforcer) validateSubagentDepth(run *k8sclawv1alpha1.AgentRun, p
 	return nil
 }
 
-func (pe *PolicyEnforcer) validateToolPolicy(run *k8sclawv1alpha1.AgentRun, policy *k8sclawv1alpha1.ClawPolicy) error {
+func (pe *PolicyEnforcer) validateToolPolicy(run *kubeclawv1alpha1.AgentRun, policy *kubeclawv1alpha1.ClawPolicy) error {
 	if run.Spec.ToolPolicy == nil || policy.Spec.ToolGating == nil {
 		return nil
 	}
@@ -138,7 +138,7 @@ func (pe *PolicyEnforcer) validateToolPolicy(run *k8sclawv1alpha1.AgentRun, poli
 	return nil
 }
 
-func (pe *PolicyEnforcer) validateFeatureGates(run *k8sclawv1alpha1.AgentRun, policy *k8sclawv1alpha1.ClawPolicy) error {
+func (pe *PolicyEnforcer) validateFeatureGates(run *kubeclawv1alpha1.AgentRun, policy *kubeclawv1alpha1.ClawPolicy) error {
 	if policy.Spec.FeatureGates == nil {
 		return nil
 	}
@@ -175,13 +175,13 @@ type MutatingPolicyEnforcer struct {
 
 // Handle mutates AgentRun resources to enforce policy defaults.
 func (mpe *MutatingPolicyEnforcer) Handle(ctx context.Context, req admission.Request) admission.Response {
-	run := &k8sclawv1alpha1.AgentRun{}
+	run := &kubeclawv1alpha1.AgentRun{}
 	if err := mpe.decoder.Decode(req, run); err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
 	// Look up the owning ClawInstance
-	var instance k8sclawv1alpha1.ClawInstance
+	var instance kubeclawv1alpha1.ClawInstance
 	if err := mpe.Client.Get(ctx, types.NamespacedName{
 		Name:      run.Spec.InstanceRef,
 		Namespace: run.Namespace,
@@ -193,7 +193,7 @@ func (mpe *MutatingPolicyEnforcer) Handle(ctx context.Context, req admission.Req
 		return admission.Allowed("no policy")
 	}
 
-	var policy k8sclawv1alpha1.ClawPolicy
+	var policy kubeclawv1alpha1.ClawPolicy
 	if err := mpe.Client.Get(ctx, types.NamespacedName{
 		Name:      instance.Spec.PolicyRef,
 		Namespace: run.Namespace,
@@ -206,7 +206,7 @@ func (mpe *MutatingPolicyEnforcer) Handle(ctx context.Context, req admission.Req
 	// Inject sandbox defaults
 	if policy.Spec.SandboxPolicy != nil && policy.Spec.SandboxPolicy.Required {
 		if run.Spec.Sandbox == nil {
-			run.Spec.Sandbox = &k8sclawv1alpha1.AgentRunSandboxSpec{
+			run.Spec.Sandbox = &kubeclawv1alpha1.AgentRunSandboxSpec{
 				Enabled: true,
 			}
 			modified = true
@@ -219,7 +219,7 @@ func (mpe *MutatingPolicyEnforcer) Handle(ctx context.Context, req admission.Req
 
 	// Inject tool policy defaults from ClawPolicy
 	if policy.Spec.ToolGating != nil && run.Spec.ToolPolicy == nil {
-		tp := &k8sclawv1alpha1.ToolPolicySpec{}
+		tp := &kubeclawv1alpha1.ToolPolicySpec{}
 		for _, rule := range policy.Spec.ToolGating.Rules {
 			switch rule.Action {
 			case "allow":
@@ -236,12 +236,12 @@ func (mpe *MutatingPolicyEnforcer) Handle(ctx context.Context, req admission.Req
 	if run.Labels == nil {
 		run.Labels = make(map[string]string)
 	}
-	if _, exists := run.Labels["k8sclaw.io/role"]; !exists {
-		run.Labels["k8sclaw.io/role"] = "agent"
+	if _, exists := run.Labels["kubeclaw.io/role"]; !exists {
+		run.Labels["kubeclaw.io/role"] = "agent"
 		modified = true
 	}
 	if run.Spec.Sandbox != nil && run.Spec.Sandbox.Enabled {
-		run.Labels["k8sclaw.io/sandbox"] = "true"
+		run.Labels["kubeclaw.io/sandbox"] = "true"
 		modified = true
 	}
 
@@ -249,8 +249,8 @@ func (mpe *MutatingPolicyEnforcer) Handle(ctx context.Context, req admission.Req
 	if run.Annotations == nil {
 		run.Annotations = make(map[string]string)
 	}
-	if _, exists := run.Annotations["k8sclaw.io/disable-sa-token"]; !exists {
-		run.Annotations["k8sclaw.io/disable-sa-token"] = "true"
+	if _, exists := run.Annotations["kubeclaw.io/disable-sa-token"]; !exists {
+		run.Annotations["kubeclaw.io/disable-sa-token"] = "true"
 		modified = true
 	}
 

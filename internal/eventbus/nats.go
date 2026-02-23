@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	streamName    = "k8sclaw"
-	consumerGroup = "k8sclaw-workers"
+	streamName    = "kubeclaw"
+	consumerGroup = "kubeclaw-workers"
 )
 
 // NATSEventBus implements EventBus using NATS JetStream.
@@ -45,7 +45,7 @@ func NewNATSEventBus(url string) (*NATSEventBus, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		stream, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 			Name:      streamName,
-			Subjects:  []string{"k8sclaw.>"},
+			Subjects:  []string{"kubeclaw.>"},
 			Retention: jetstream.LimitsPolicy,
 			MaxAge:    24 * time.Hour,
 			Storage:   jetstream.FileStorage,
@@ -140,7 +140,7 @@ func (n *NATSEventBus) Close() error {
 }
 
 // topicToSubject converts a dotted topic (e.g. "agent.run.completed")
-// to a NATS subject under the k8sclaw namespace (e.g. "k8sclaw.agent.run.completed").
+// to a NATS subject under the kubeclaw namespace (e.g. "kubeclaw.agent.run.completed").
 func topicToSubject(topic string) string {
-	return "k8sclaw." + topic
+	return "kubeclaw." + topic
 }

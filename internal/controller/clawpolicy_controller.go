@@ -10,7 +10,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
 // ClawPolicyReconciler reconciles a ClawPolicy object.
@@ -20,14 +20,14 @@ type ClawPolicyReconciler struct {
 	Log    logr.Logger
 }
 
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawpolicies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawpolicies/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawpolicies/status,verbs=get;update;patch
 
 // Reconcile handles ClawPolicy reconciliation.
 func (r *ClawPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("clawpolicy", req.NamespacedName)
 
-	var policy k8sclawv1alpha1.ClawPolicy
+	var policy kubeclawv1alpha1.ClawPolicy
 	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -36,7 +36,7 @@ func (r *ClawPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Count ClawInstances that reference this policy
-	var instances k8sclawv1alpha1.ClawInstanceList
+	var instances kubeclawv1alpha1.ClawInstanceList
 	if err := r.List(ctx, &instances, client.InNamespace(req.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -62,6 +62,6 @@ func (r *ClawPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClawPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&k8sclawv1alpha1.ClawPolicy{}).
+		For(&kubeclawv1alpha1.ClawPolicy{}).
 		Complete(r)
 }

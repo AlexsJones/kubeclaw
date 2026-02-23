@@ -1,4 +1,4 @@
-module github.com/k8sclaw/k8sclaw
+module github.com/kubeclaw/kubeclaw
 
 go 1.24.2
 
@@ -16,6 +16,7 @@ require (
 	github.com/nats-io/nats.go v1.48.0
 	github.com/openai/openai-go/v3 v3.22.0
 	github.com/prometheus/client_golang v1.20.5
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1
 	k8s.io/api v0.32.0
 	k8s.io/apimachinery v0.32.0
@@ -78,7 +79,6 @@ require (
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

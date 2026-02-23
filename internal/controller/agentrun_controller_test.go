@@ -8,22 +8,22 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
 // helper builds a minimal AgentRun for testing.
-func newTestRun() *k8sclawv1alpha1.AgentRun {
-	return &k8sclawv1alpha1.AgentRun{
+func newTestRun() *kubeclawv1alpha1.AgentRun {
+	return &kubeclawv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-run",
 			Namespace: "default",
 		},
-		Spec: k8sclawv1alpha1.AgentRunSpec{
+		Spec: kubeclawv1alpha1.AgentRunSpec{
 			InstanceRef: "my-instance",
 			AgentID:     "default",
 			SessionKey:  "sess-1",
 			Task:        "do stuff",
-			Model: k8sclawv1alpha1.ModelSpec{
+			Model: kubeclawv1alpha1.ModelSpec{
 				Provider:      "openai",
 				Model:         "gpt-4o",
 				AuthSecretRef: "my-secret",
@@ -53,14 +53,14 @@ func TestBuildJob_Labels(t *testing.T) {
 	job := r.buildJob(run, false)
 
 	labels := job.Spec.Template.Labels
-	if labels["k8sclaw.io/instance"] != "my-instance" {
-		t.Errorf("instance label = %q", labels["k8sclaw.io/instance"])
+	if labels["kubeclaw.io/instance"] != "my-instance" {
+		t.Errorf("instance label = %q", labels["kubeclaw.io/instance"])
 	}
-	if labels["k8sclaw.io/agent-run"] != "test-run" {
-		t.Errorf("agent-run label = %q", labels["k8sclaw.io/agent-run"])
+	if labels["kubeclaw.io/agent-run"] != "test-run" {
+		t.Errorf("agent-run label = %q", labels["kubeclaw.io/agent-run"])
 	}
-	if labels["k8sclaw.io/component"] != "agent-run" {
-		t.Errorf("component label = %q", labels["k8sclaw.io/component"])
+	if labels["kubeclaw.io/component"] != "agent-run" {
+		t.Errorf("component label = %q", labels["kubeclaw.io/component"])
 	}
 }
 
@@ -101,8 +101,8 @@ func TestBuildJob_ServiceAccount(t *testing.T) {
 	r := &AgentRunReconciler{}
 	job := r.buildJob(newTestRun(), false)
 
-	if job.Spec.Template.Spec.ServiceAccountName != "k8sclaw-agent" {
-		t.Errorf("SA = %q, want k8sclaw-agent", job.Spec.Template.Spec.ServiceAccountName)
+	if job.Spec.Template.Spec.ServiceAccountName != "kubeclaw-agent" {
+		t.Errorf("SA = %q, want kubeclaw-agent", job.Spec.Template.Spec.ServiceAccountName)
 	}
 }
 
@@ -270,7 +270,7 @@ func TestBuildContainers_IPCBridgeEnvVars(t *testing.T) {
 func TestBuildContainers_WithSandbox(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	run.Spec.Sandbox = &k8sclawv1alpha1.AgentRunSandboxSpec{Enabled: true}
+	run.Spec.Sandbox = &kubeclawv1alpha1.AgentRunSandboxSpec{Enabled: true}
 	cs := r.buildContainers(run, false)
 	// agent + ipc-bridge + sandbox = 3
 	if len(cs) != 3 {
@@ -284,7 +284,7 @@ func TestBuildContainers_WithSandbox(t *testing.T) {
 func TestBuildContainers_SandboxCustomImage(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	run.Spec.Sandbox = &k8sclawv1alpha1.AgentRunSandboxSpec{
+	run.Spec.Sandbox = &kubeclawv1alpha1.AgentRunSandboxSpec{
 		Enabled: true,
 		Image:   "my-sandbox:v1",
 	}
@@ -297,7 +297,7 @@ func TestBuildContainers_SandboxCustomImage(t *testing.T) {
 func TestBuildContainers_SandboxDisabled(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	run.Spec.Sandbox = &k8sclawv1alpha1.AgentRunSandboxSpec{Enabled: false}
+	run.Spec.Sandbox = &kubeclawv1alpha1.AgentRunSandboxSpec{Enabled: false}
 	cs := r.buildContainers(run, false)
 	if len(cs) != 2 {
 		t.Errorf("container count = %d, want 2 (sandbox disabled)", len(cs))
@@ -342,7 +342,7 @@ func TestBuildVolumes_IPCUsesMemory(t *testing.T) {
 func TestBuildVolumes_SkillsWithRefs(t *testing.T) {
 	r := &AgentRunReconciler{}
 	run := newTestRun()
-	run.Spec.Skills = []k8sclawv1alpha1.SkillRef{
+	run.Spec.Skills = []kubeclawv1alpha1.SkillRef{
 		{ConfigMapRef: "my-skills"},
 	}
 	vols := r.buildVolumes(run, false)

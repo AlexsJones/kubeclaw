@@ -1,12 +1,12 @@
 ---
-# NATS server for K8sClaw event bus
+# NATS server for KubeClaw event bus
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nats
-  namespace: k8sclaw-system
+  namespace: kubeclaw-system
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
     app.kubernetes.io/component: nats
 spec:
   replicas: 1
@@ -71,9 +71,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nats
-  namespace: k8sclaw-system
+  namespace: kubeclaw-system
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
     app.kubernetes.io/component: nats
 spec:
   selector:

@@ -1,4 +1,4 @@
-// Package main is the entry point for the K8sClaw IPC bridge sidecar.
+// Package main is the entry point for the KubeClaw IPC bridge sidecar.
 // It runs inside agent pods and mediates between the agent container
 // and the control plane via the event bus.
 package main
@@ -12,8 +12,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/k8sclaw/k8sclaw/internal/eventbus"
-	"github.com/k8sclaw/k8sclaw/internal/ipc"
+	"github.com/kubeclaw/kubeclaw/internal/eventbus"
+	"github.com/kubeclaw/kubeclaw/internal/ipc"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 		panic("AGENT_RUN_ID is required")
 	}
 	if eventBusURL == "" {
-		eventBusURL = "nats://nats.k8sclaw-system.svc:4222"
+		eventBusURL = "nats://nats.kubeclaw-system.svc:4222"
 	}
 
 	log := zap.New(zap.UseDevMode(false)).WithName("ipc-bridge")

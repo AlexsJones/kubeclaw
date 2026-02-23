@@ -20,11 +20,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
-	"github.com/k8sclaw/k8sclaw/internal/orchestrator"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
+	"github.com/kubeclaw/kubeclaw/internal/orchestrator"
 )
 
-const agentRunFinalizer = "k8sclaw.io/agentrun-finalizer"
+const agentRunFinalizer = "kubeclaw.io/agentrun-finalizer"
 
 // AgentRunReconciler reconciles AgentRun objects.
 // It watches AgentRun CRDs and reconciles them into Kubernetes Jobs/Pods.
@@ -36,9 +36,9 @@ type AgentRunReconciler struct {
 	Clientset  kubernetes.Interface
 }
 
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=agentruns/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=agentruns/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=agentruns/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=agentruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
@@ -50,7 +50,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	log := r.Log.WithValues("agentrun", req.NamespacedName)
 
 	// Fetch the AgentRun
-	agentRun := &k8sclawv1alpha1.AgentRun{}
+	agentRun := &kubeclawv1alpha1.AgentRun{}
 	if err := r.Get(ctx, req.NamespacedName, agentRun); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -73,11 +73,11 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Reconcile based on current phase
 	switch agentRun.Status.Phase {
-	case "", k8sclawv1alpha1.AgentRunPhasePending:
+	case "", kubeclawv1alpha1.AgentRunPhasePending:
 		return r.reconcilePending(ctx, log, agentRun)
-	case k8sclawv1alpha1.AgentRunPhaseRunning:
+	case kubeclawv1alpha1.AgentRunPhaseRunning:
 		return r.reconcileRunning(ctx, log, agentRun)
-	case k8sclawv1alpha1.AgentRunPhaseSucceeded, k8sclawv1alpha1.AgentRunPhaseFailed:
+	case kubeclawv1alpha1.AgentRunPhaseSucceeded, kubeclawv1alpha1.AgentRunPhaseFailed:
 		return r.reconcileCompleted(ctx, log, agentRun)
 	default:
 		log.Info("Unknown phase", "phase", agentRun.Status.Phase)
@@ -86,7 +86,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 // reconcilePending handles an AgentRun that needs a Job created.
-func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logger, agentRun *k8sclawv1alpha1.AgentRun) (ctrl.Result, error) {
+func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (ctrl.Result, error) {
 	log.Info("Reconciling pending AgentRun")
 
 	// Validate against policy
@@ -94,7 +94,7 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 		return ctrl.Result{}, r.failRun(ctx, agentRun, fmt.Sprintf("policy validation failed: %v", err))
 	}
 
-	// Ensure the k8sclaw-agent ServiceAccount exists in the target namespace.
+	// Ensure the kubeclaw-agent ServiceAccount exists in the target namespace.
 	if err := r.ensureAgentServiceAccount(ctx, agentRun.Namespace); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensuring agent service account: %w", err)
 	}
@@ -105,7 +105,7 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 	}
 
 	// Look up the ClawInstance to check for memory configuration.
-	instance := &k8sclawv1alpha1.ClawInstance{}
+	instance := &kubeclawv1alpha1.ClawInstance{}
 	memoryEnabled := false
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: agentRun.Namespace,
@@ -132,7 +132,7 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 
 	// Update status to Running
 	now := metav1.Now()
-	agentRun.Status.Phase = k8sclawv1alpha1.AgentRunPhaseRunning
+	agentRun.Status.Phase = kubeclawv1alpha1.AgentRunPhaseRunning
 	agentRun.Status.JobName = job.Name
 	agentRun.Status.StartedAt = &now
 	if err := r.Status().Update(ctx, agentRun); err != nil {
@@ -143,7 +143,7 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 }
 
 // reconcileRunning checks on a running Job and updates status.
-func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logger, agentRun *k8sclawv1alpha1.AgentRun) (ctrl.Result, error) {
+func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (ctrl.Result, error) {
 	log.Info("Checking running AgentRun")
 
 	// Find the Job
@@ -164,7 +164,7 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 		podList := &corev1.PodList{}
 		if err := r.List(ctx, podList,
 			client.InNamespace(agentRun.Namespace),
-			client.MatchingLabels{"k8sclaw.io/agent-run": agentRun.Name},
+			client.MatchingLabels{"kubeclaw.io/agent-run": agentRun.Name},
 		); err == nil && len(podList.Items) > 0 {
 			agentRun.Status.PodName = podList.Items[0].Name
 			_ = r.Status().Update(ctx, agentRun)
@@ -198,7 +198,7 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 }
 
 // reconcileCompleted handles cleanup of completed AgentRuns.
-func (r *AgentRunReconciler) reconcileCompleted(ctx context.Context, log logr.Logger, agentRun *k8sclawv1alpha1.AgentRun) (ctrl.Result, error) {
+func (r *AgentRunReconciler) reconcileCompleted(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (ctrl.Result, error) {
 	if agentRun.Spec.Cleanup == "delete" {
 		log.Info("Cleaning up completed AgentRun")
 		controllerutil.RemoveFinalizer(agentRun, agentRunFinalizer)
@@ -210,7 +210,7 @@ func (r *AgentRunReconciler) reconcileCompleted(ctx context.Context, log logr.Lo
 }
 
 // reconcileDelete handles AgentRun deletion.
-func (r *AgentRunReconciler) reconcileDelete(ctx context.Context, log logr.Logger, agentRun *k8sclawv1alpha1.AgentRun) (ctrl.Result, error) {
+func (r *AgentRunReconciler) reconcileDelete(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (ctrl.Result, error) {
 	log.Info("Reconciling AgentRun deletion")
 
 	// Delete the Job if it exists
@@ -231,9 +231,9 @@ func (r *AgentRunReconciler) reconcileDelete(ctx context.Context, log logr.Logge
 }
 
 // validatePolicy checks the AgentRun against the applicable ClawPolicy.
-func (r *AgentRunReconciler) validatePolicy(ctx context.Context, agentRun *k8sclawv1alpha1.AgentRun) error {
+func (r *AgentRunReconciler) validatePolicy(ctx context.Context, agentRun *kubeclawv1alpha1.AgentRun) error {
 	// Look up the ClawInstance to find the policy
-	instance := &k8sclawv1alpha1.ClawInstance{}
+	instance := &kubeclawv1alpha1.ClawInstance{}
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: agentRun.Namespace,
 		Name:      agentRun.Spec.InstanceRef,
@@ -245,7 +245,7 @@ func (r *AgentRunReconciler) validatePolicy(ctx context.Context, agentRun *k8scl
 		return nil // No policy, allow
 	}
 
-	policy := &k8sclawv1alpha1.ClawPolicy{}
+	policy := &kubeclawv1alpha1.ClawPolicy{}
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: agentRun.Namespace,
 		Name:      instance.Spec.PolicyRef,
@@ -263,14 +263,14 @@ func (r *AgentRunReconciler) validatePolicy(ctx context.Context, agentRun *k8scl
 
 	// Validate concurrency
 	if policy.Spec.SubagentPolicy != nil {
-		activeRuns := &k8sclawv1alpha1.AgentRunList{}
+		activeRuns := &kubeclawv1alpha1.AgentRunList{}
 		if err := r.List(ctx, activeRuns,
 			client.InNamespace(agentRun.Namespace),
-			client.MatchingLabels{"k8sclaw.io/instance": agentRun.Spec.InstanceRef},
+			client.MatchingLabels{"kubeclaw.io/instance": agentRun.Spec.InstanceRef},
 		); err == nil {
 			running := 0
 			for _, run := range activeRuns.Items {
-				if run.Status.Phase == k8sclawv1alpha1.AgentRunPhaseRunning {
+				if run.Status.Phase == kubeclawv1alpha1.AgentRunPhaseRunning {
 					running++
 				}
 			}
@@ -283,12 +283,12 @@ func (r *AgentRunReconciler) validatePolicy(ctx context.Context, agentRun *k8scl
 	return nil
 }
 
-// ensureAgentServiceAccount creates the k8sclaw-agent ServiceAccount in the
+// ensureAgentServiceAccount creates the kubeclaw-agent ServiceAccount in the
 // given namespace if it does not already exist. This is needed because agent
-// Jobs reference this SA and run in the user's namespace, not k8sclaw-system.
+// Jobs reference this SA and run in the user's namespace, not kubeclaw-system.
 func (r *AgentRunReconciler) ensureAgentServiceAccount(ctx context.Context, namespace string) error {
 	sa := &corev1.ServiceAccount{}
-	err := r.Get(ctx, client.ObjectKey{Name: "k8sclaw-agent", Namespace: namespace}, sa)
+	err := r.Get(ctx, client.ObjectKey{Name: "kubeclaw-agent", Namespace: namespace}, sa)
 	if err == nil {
 		return nil // already exists
 	}
@@ -297,10 +297,10 @@ func (r *AgentRunReconciler) ensureAgentServiceAccount(ctx context.Context, name
 	}
 	sa = &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "k8sclaw-agent",
+			Name:      "kubeclaw-agent",
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "k8sclaw",
+				"app.kubernetes.io/managed-by": "kubeclaw",
 			},
 		},
 	}
@@ -314,11 +314,11 @@ func (r *AgentRunReconciler) ensureAgentServiceAccount(ctx context.Context, name
 }
 
 // buildJob constructs the Kubernetes Job for an AgentRun.
-func (r *AgentRunReconciler) buildJob(agentRun *k8sclawv1alpha1.AgentRun, memoryEnabled bool) *batchv1.Job {
+func (r *AgentRunReconciler) buildJob(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool) *batchv1.Job {
 	labels := map[string]string{
-		"k8sclaw.io/agent-run": agentRun.Name,
-		"k8sclaw.io/instance":  agentRun.Spec.InstanceRef,
-		"k8sclaw.io/component": "agent-run",
+		"kubeclaw.io/agent-run": agentRun.Name,
+		"kubeclaw.io/instance":  agentRun.Spec.InstanceRef,
+		"kubeclaw.io/component": "agent-run",
 	}
 
 	ttl := int32(300)
@@ -352,7 +352,7 @@ func (r *AgentRunReconciler) buildJob(agentRun *k8sclawv1alpha1.AgentRun, memory
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,
-					ServiceAccountName: "k8sclaw-agent",
+					ServiceAccountName: "kubeclaw-agent",
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: &runAsNonRoot,
 						RunAsUser:    &runAsUser,
@@ -367,7 +367,7 @@ func (r *AgentRunReconciler) buildJob(agentRun *k8sclawv1alpha1.AgentRun, memory
 }
 
 // buildContainers constructs the container list for an agent pod.
-func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun, memoryEnabled bool) []corev1.Container {
+func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool) []corev1.Container {
 	readOnly := true
 	noPrivEsc := false
 
@@ -375,7 +375,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun,
 		// Main agent container
 		{
 			Name:            "agent",
-			Image:           "ghcr.io/alexsjones/k8sclaw/agent-runner:latest",
+			Image:           "ghcr.io/alexsjones/kubeclaw/agent-runner:latest",
 			ImagePullPolicy: corev1.PullAlways,
 			SecurityContext: &corev1.SecurityContext{
 				ReadOnlyRootFilesystem:   &readOnly,
@@ -415,12 +415,12 @@ func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun,
 		// IPC bridge sidecar
 		{
 			Name:            "ipc-bridge",
-			Image:           "ghcr.io/alexsjones/k8sclaw/ipc-bridge:latest",
+			Image:           "ghcr.io/alexsjones/kubeclaw/ipc-bridge:latest",
 			ImagePullPolicy: corev1.PullAlways,
 			Env: []corev1.EnvVar{
 				{Name: "AGENT_RUN_ID", Value: agentRun.Name},
 				{Name: "INSTANCE_NAME", Value: agentRun.Spec.InstanceRef},
-				{Name: "EVENT_BUS_URL", Value: "nats://nats.k8sclaw-system.svc:4222"},
+				{Name: "EVENT_BUS_URL", Value: "nats://nats.kubeclaw-system.svc:4222"},
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "ipc", MountPath: "/ipc"},
@@ -463,7 +463,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun,
 
 	// Add sandbox sidecar if enabled
 	if agentRun.Spec.Sandbox != nil && agentRun.Spec.Sandbox.Enabled {
-		sandboxImage := "ghcr.io/alexsjones/k8sclaw/sandbox:latest"
+		sandboxImage := "ghcr.io/alexsjones/kubeclaw/sandbox:latest"
 		if agentRun.Spec.Sandbox.Image != "" {
 			sandboxImage = agentRun.Spec.Sandbox.Image
 		}
@@ -500,7 +500,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun,
 }
 
 // buildVolumes constructs the volume list for an agent pod.
-func (r *AgentRunReconciler) buildVolumes(agentRun *k8sclawv1alpha1.AgentRun, memoryEnabled bool) []corev1.Volume {
+func (r *AgentRunReconciler) buildVolumes(agentRun *kubeclawv1alpha1.AgentRun, memoryEnabled bool) []corev1.Volume {
 	workspaceSizeLimit := resource.MustParse("1Gi")
 	ipcSizeLimit := resource.MustParse("64Mi")
 	tmpSizeLimit := resource.MustParse("256Mi")
@@ -599,13 +599,13 @@ func (r *AgentRunReconciler) buildVolumes(agentRun *k8sclawv1alpha1.AgentRun, me
 func boolPtr(b bool) *bool { return &b }
 
 // createInputConfigMap creates a ConfigMap with the agent's task input.
-func (r *AgentRunReconciler) createInputConfigMap(ctx context.Context, agentRun *k8sclawv1alpha1.AgentRun) error {
+func (r *AgentRunReconciler) createInputConfigMap(ctx context.Context, agentRun *kubeclawv1alpha1.AgentRun) error {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-input", agentRun.Name),
 			Namespace: agentRun.Namespace,
 			Labels: map[string]string{
-				"k8sclaw.io/agent-run": agentRun.Name,
+				"kubeclaw.io/agent-run": agentRun.Name,
 			},
 		},
 		Data: map[string]string{
@@ -630,22 +630,22 @@ func (r *AgentRunReconciler) createInputConfigMap(ctx context.Context, agentRun 
 }
 
 // succeedRun marks an AgentRun as succeeded and stores the result.
-func (r *AgentRunReconciler) succeedRun(ctx context.Context, agentRun *k8sclawv1alpha1.AgentRun, result string) (ctrl.Result, error) {
+func (r *AgentRunReconciler) succeedRun(ctx context.Context, agentRun *kubeclawv1alpha1.AgentRun, result string) (ctrl.Result, error) {
 	now := metav1.Now()
-	agentRun.Status.Phase = k8sclawv1alpha1.AgentRunPhaseSucceeded
+	agentRun.Status.Phase = kubeclawv1alpha1.AgentRunPhaseSucceeded
 	agentRun.Status.CompletedAt = &now
 	agentRun.Status.Result = result
 	return ctrl.Result{}, r.Status().Update(ctx, agentRun)
 }
 
 const (
-	resultMarkerStart = "__K8SCLAW_RESULT__"
-	resultMarkerEnd   = "__K8SCLAW_END__"
+	resultMarkerStart = "__KUBECLAW_RESULT__"
+	resultMarkerEnd   = "__KUBECLAW_END__"
 )
 
 // extractResultFromPod reads the agent container logs and looks for the
 // structured result marker written by agent-runner.
-func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.Logger, agentRun *k8sclawv1alpha1.AgentRun) string {
+func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) string {
 	if r.Clientset == nil || agentRun.Status.PodName == "" {
 		return ""
 	}
@@ -697,13 +697,13 @@ func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.
 }
 
 const (
-	memoryMarkerStart = "__K8SCLAW_MEMORY__"
-	memoryMarkerEnd   = "__K8SCLAW_MEMORY_END__"
+	memoryMarkerStart = "__KUBECLAW_MEMORY__"
+	memoryMarkerEnd   = "__KUBECLAW_MEMORY_END__"
 )
 
 // extractAndPersistMemory reads the agent container logs for a memory update
 // marker and patches the instance's memory ConfigMap with the new content.
-func (r *AgentRunReconciler) extractAndPersistMemory(ctx context.Context, log logr.Logger, agentRun *k8sclawv1alpha1.AgentRun) {
+func (r *AgentRunReconciler) extractAndPersistMemory(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) {
 	if r.Clientset == nil || agentRun.Status.PodName == "" {
 		return
 	}
@@ -760,9 +760,9 @@ func (r *AgentRunReconciler) extractAndPersistMemory(ctx context.Context, log lo
 }
 
 // failRun marks an AgentRun as failed.
-func (r *AgentRunReconciler) failRun(ctx context.Context, agentRun *k8sclawv1alpha1.AgentRun, reason string) error {
+func (r *AgentRunReconciler) failRun(ctx context.Context, agentRun *kubeclawv1alpha1.AgentRun, reason string) error {
 	now := metav1.Now()
-	agentRun.Status.Phase = k8sclawv1alpha1.AgentRunPhaseFailed
+	agentRun.Status.Phase = kubeclawv1alpha1.AgentRunPhaseFailed
 	agentRun.Status.CompletedAt = &now
 	agentRun.Status.Error = reason
 	return r.Status().Update(ctx, agentRun)
@@ -771,7 +771,7 @@ func (r *AgentRunReconciler) failRun(ctx context.Context, agentRun *k8sclawv1alp
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&k8sclawv1alpha1.AgentRun{}).
+		For(&kubeclawv1alpha1.AgentRun{}).
 		Owns(&batchv1.Job{}).
 		Complete(r)
 }

@@ -14,8 +14,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/k8sclaw/k8sclaw/internal/channel"
-	"github.com/k8sclaw/k8sclaw/internal/eventbus"
+	"github.com/kubeclaw/kubeclaw/internal/channel"
+	"github.com/kubeclaw/kubeclaw/internal/eventbus"
 )
 
 // DiscordChannel implements the Discord Gateway channel.

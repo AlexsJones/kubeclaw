@@ -1,6 +1,6 @@
 ---
 # Example ClawPolicy
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: ClawPolicy
 metadata:
   name: default-policy
@@ -20,7 +20,7 @@ spec:
     maxConcurrent: 5
   sandboxPolicy:
     required: false
-    defaultImage: ghcr.io/alexsjones/k8sclaw/sandbox:latest
+    defaultImage: ghcr.io/alexsjones/kubeclaw/sandbox:latest
     maxCPU: "4"
     maxMemory: 8Gi
   featureGates:

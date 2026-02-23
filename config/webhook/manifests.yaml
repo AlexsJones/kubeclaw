@@ -3,10 +3,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: k8sclaw-webhook
-  namespace: k8sclaw-system
+  name: kubeclaw-webhook
+  namespace: kubeclaw-system
   labels:
-    app.kubernetes.io/name: k8sclaw
+    app.kubernetes.io/name: kubeclaw
     app.kubernetes.io/component: webhook
 spec:
   replicas: 2
@@ -18,14 +18,14 @@ spec:
       labels:
         app.kubernetes.io/component: webhook
     spec:
-      serviceAccountName: k8sclaw-controller-manager
+      serviceAccountName: kubeclaw-controller-manager
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: webhook
-          image: ghcr.io/alexsjones/k8sclaw/webhook:latest
+          image: ghcr.io/alexsjones/kubeclaw/webhook:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 9443
@@ -49,13 +49,13 @@ spec:
       volumes:
         - name: cert
           secret:
-            secretName: k8sclaw-webhook-cert
+            secretName: kubeclaw-webhook-cert
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: k8sclaw-webhook-service
-  namespace: k8sclaw-system
+  name: kubeclaw-webhook-service
+  namespace: kubeclaw-system
 spec:
   selector:
     app.kubernetes.io/component: webhook
@@ -67,16 +67,16 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: k8sclaw-validating-webhook
+  name: kubeclaw-validating-webhook
   annotations:
-    cert-manager.io/inject-ca-from: k8sclaw-system/k8sclaw-webhook-cert
+    cert-manager.io/inject-ca-from: kubeclaw-system/kubeclaw-webhook-cert
 webhooks:
-  - name: vagentpod.k8sclaw.io
+  - name: vagentpod.kubeclaw.io
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
-        name: k8sclaw-webhook-service
-        namespace: k8sclaw-system
+        name: kubeclaw-webhook-service
+        namespace: kubeclaw-system
         path: /validate-agent-pods
     failurePolicy: Ignore
     rules:
@@ -86,22 +86,22 @@ webhooks:
         resources: ["pods"]
     objectSelector:
       matchLabels:
-        k8sclaw.io/agent-pod: "true"
+        kubeclaw.io/agent-pod: "true"
     sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: k8sclaw-mutating-webhook
+  name: kubeclaw-mutating-webhook
   annotations:
-    cert-manager.io/inject-ca-from: k8sclaw-system/k8sclaw-webhook-cert
+    cert-manager.io/inject-ca-from: kubeclaw-system/kubeclaw-webhook-cert
 webhooks:
-  - name: magentpod.k8sclaw.io
+  - name: magentpod.kubeclaw.io
     admissionReviewVersions: ["v1"]
     clientConfig:
       service:
-        name: k8sclaw-webhook-service
-        namespace: k8sclaw-system
+        name: kubeclaw-webhook-service
+        namespace: kubeclaw-system
         path: /mutate-agent-pods
     failurePolicy: Ignore
     rules:
@@ -111,6 +111,6 @@ webhooks:
         resources: ["pods"]
     objectSelector:
       matchLabels:
-        k8sclaw.io/agent-pod: "true"
+        kubeclaw.io/agent-pod: "true"
     sideEffects: None
     reinvocationPolicy: IfNeeded

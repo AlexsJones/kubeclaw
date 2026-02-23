@@ -1,4 +1,4 @@
-// Package controller contains the reconciliation logic for K8sClaw CRDs.
+// Package controller contains the reconciliation logic for KubeClaw CRDs.
 package controller
 
 import (
@@ -18,10 +18,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	k8sclawv1alpha1 "github.com/k8sclaw/k8sclaw/api/v1alpha1"
+	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 )
 
-const clawInstanceFinalizer = "k8sclaw.io/finalizer"
+const clawInstanceFinalizer = "kubeclaw.io/finalizer"
 
 // ClawInstanceReconciler reconciles a ClawInstance object.
 type ClawInstanceReconciler struct {
@@ -30,9 +30,9 @@ type ClawInstanceReconciler struct {
 	Log    logr.Logger
 }
 
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawinstances,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawinstances/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=k8sclaw.io,resources=clawinstances/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawinstances,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawinstances/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kubeclaw.io,resources=clawinstances/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets;configmaps;services,verbs=get;list;watch;create;update;patch;delete
 
@@ -40,7 +40,7 @@ type ClawInstanceReconciler struct {
 func (r *ClawInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("clawinstance", req.NamespacedName)
 
-	var instance k8sclawv1alpha1.ClawInstance
+	var instance kubeclawv1alpha1.ClawInstance
 	if err := r.Get(ctx, req.NamespacedName, &instance); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -104,8 +104,8 @@ func (r *ClawInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 // reconcileChannels ensures a Deployment exists for each configured channel.
-func (r *ClawInstanceReconciler) reconcileChannels(ctx context.Context, instance *k8sclawv1alpha1.ClawInstance) error {
-	channelStatuses := make([]k8sclawv1alpha1.ChannelStatus, 0, len(instance.Spec.Channels))
+func (r *ClawInstanceReconciler) reconcileChannels(ctx context.Context, instance *kubeclawv1alpha1.ClawInstance) error {
+	channelStatuses := make([]kubeclawv1alpha1.ChannelStatus, 0, len(instance.Spec.Channels))
 
 	for _, ch := range instance.Spec.Channels {
 		deployName := fmt.Sprintf("%s-channel-%s", instance.Name, ch.Type)
@@ -125,7 +125,7 @@ func (r *ClawInstanceReconciler) reconcileChannels(ctx context.Context, instance
 			if err := r.Create(ctx, deploy); err != nil {
 				return err
 			}
-			channelStatuses = append(channelStatuses, k8sclawv1alpha1.ChannelStatus{
+			channelStatuses = append(channelStatuses, kubeclawv1alpha1.ChannelStatus{
 				Type:   ch.Type,
 				Status: "Pending",
 			})
@@ -136,7 +136,7 @@ func (r *ClawInstanceReconciler) reconcileChannels(ctx context.Context, instance
 			if deploy.Status.ReadyReplicas == 0 {
 				status = "Disconnected"
 			}
-			channelStatuses = append(channelStatuses, k8sclawv1alpha1.ChannelStatus{
+			channelStatuses = append(channelStatuses, kubeclawv1alpha1.ChannelStatus{
 				Type:   ch.Type,
 				Status: status,
 			})
@@ -149,38 +149,38 @@ func (r *ClawInstanceReconciler) reconcileChannels(ctx context.Context, instance
 
 // buildChannelDeployment creates a Deployment spec for a channel pod.
 func (r *ClawInstanceReconciler) buildChannelDeployment(
-	instance *k8sclawv1alpha1.ClawInstance,
-	ch k8sclawv1alpha1.ChannelSpec,
+	instance *kubeclawv1alpha1.ClawInstance,
+	ch kubeclawv1alpha1.ChannelSpec,
 	name string,
 ) *appsv1.Deployment {
 	replicas := int32(1)
-	image := fmt.Sprintf("ghcr.io/alexsjones/k8sclaw/channel-%s:latest", ch.Type)
+	image := fmt.Sprintf("ghcr.io/alexsjones/kubeclaw/channel-%s:latest", ch.Type)
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
 			Labels: map[string]string{
-				"k8sclaw.io/component": "channel",
-				"k8sclaw.io/channel":   ch.Type,
-				"k8sclaw.io/instance":  instance.Name,
+				"kubeclaw.io/component": "channel",
+				"kubeclaw.io/channel":   ch.Type,
+				"kubeclaw.io/instance":  instance.Name,
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"k8sclaw.io/component": "channel",
-					"k8sclaw.io/channel":   ch.Type,
-					"k8sclaw.io/instance":  instance.Name,
+					"kubeclaw.io/component": "channel",
+					"kubeclaw.io/channel":   ch.Type,
+					"kubeclaw.io/instance":  instance.Name,
 				},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"k8sclaw.io/component": "channel",
-						"k8sclaw.io/channel":   ch.Type,
-						"k8sclaw.io/instance":  instance.Name,
+						"kubeclaw.io/component": "channel",
+						"kubeclaw.io/channel":   ch.Type,
+						"kubeclaw.io/instance":  instance.Name,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -200,7 +200,7 @@ func (r *ClawInstanceReconciler) buildChannelDeployment(
 							},
 							Env: []corev1.EnvVar{
 								{Name: "INSTANCE_NAME", Value: instance.Name},
-									{Name: "EVENT_BUS_URL", Value: "nats://nats.k8sclaw-system.svc:4222"},
+									{Name: "EVENT_BUS_URL", Value: "nats://nats.kubeclaw-system.svc:4222"},
 							},
 						},
 					},
@@ -211,11 +211,11 @@ func (r *ClawInstanceReconciler) buildChannelDeployment(
 }
 
 // cleanupChannelDeployments removes channel deployments owned by the instance.
-func (r *ClawInstanceReconciler) cleanupChannelDeployments(ctx context.Context, instance *k8sclawv1alpha1.ClawInstance) error {
+func (r *ClawInstanceReconciler) cleanupChannelDeployments(ctx context.Context, instance *kubeclawv1alpha1.ClawInstance) error {
 	var deploys appsv1.DeploymentList
 	if err := r.List(ctx, &deploys,
 		client.InNamespace(instance.Namespace),
-		client.MatchingLabels{"k8sclaw.io/instance": instance.Name, "k8sclaw.io/component": "channel"},
+		client.MatchingLabels{"kubeclaw.io/instance": instance.Name, "kubeclaw.io/component": "channel"},
 	); err != nil {
 		return err
 	}
@@ -230,18 +230,18 @@ func (r *ClawInstanceReconciler) cleanupChannelDeployments(ctx context.Context, 
 }
 
 // countActiveAgentPods counts running agent pods for this instance.
-func (r *ClawInstanceReconciler) countActiveAgentPods(ctx context.Context, instance *k8sclawv1alpha1.ClawInstance) (int, error) {
-	var runs k8sclawv1alpha1.AgentRunList
+func (r *ClawInstanceReconciler) countActiveAgentPods(ctx context.Context, instance *kubeclawv1alpha1.ClawInstance) (int, error) {
+	var runs kubeclawv1alpha1.AgentRunList
 	if err := r.List(ctx, &runs,
 		client.InNamespace(instance.Namespace),
-		client.MatchingLabels{"k8sclaw.io/instance": instance.Name},
+		client.MatchingLabels{"kubeclaw.io/instance": instance.Name},
 	); err != nil {
 		return 0, err
 	}
 
 	count := 0
 	for _, run := range runs.Items {
-		if run.Status.Phase == k8sclawv1alpha1.AgentRunPhaseRunning {
+		if run.Status.Phase == kubeclawv1alpha1.AgentRunPhaseRunning {
 			count++
 		}
 	}
@@ -251,7 +251,7 @@ func (r *ClawInstanceReconciler) countActiveAgentPods(ctx context.Context, insta
 // reconcileMemoryConfigMap ensures the memory ConfigMap exists when memory is
 // enabled for the instance. The ConfigMap is named "<instance>-memory" and
 // contains a single key "MEMORY.md".
-func (r *ClawInstanceReconciler) reconcileMemoryConfigMap(ctx context.Context, log logr.Logger, instance *k8sclawv1alpha1.ClawInstance) error {
+func (r *ClawInstanceReconciler) reconcileMemoryConfigMap(ctx context.Context, log logr.Logger, instance *kubeclawv1alpha1.ClawInstance) error {
 	if instance.Spec.Memory == nil || !instance.Spec.Memory.Enabled {
 		return nil
 	}
@@ -273,8 +273,8 @@ func (r *ClawInstanceReconciler) reconcileMemoryConfigMap(ctx context.Context, l
 			Name:      cmName,
 			Namespace: instance.Namespace,
 			Labels: map[string]string{
-				"k8sclaw.io/instance":  instance.Name,
-				"k8sclaw.io/component": "memory",
+				"kubeclaw.io/instance":  instance.Name,
+				"kubeclaw.io/component": "memory",
 			},
 		},
 		Data: map[string]string{
@@ -291,7 +291,7 @@ func (r *ClawInstanceReconciler) reconcileMemoryConfigMap(ctx context.Context, l
 }
 
 // cleanupMemoryConfigMap deletes the memory ConfigMap for an instance.
-func (r *ClawInstanceReconciler) cleanupMemoryConfigMap(ctx context.Context, instance *k8sclawv1alpha1.ClawInstance) error {
+func (r *ClawInstanceReconciler) cleanupMemoryConfigMap(ctx context.Context, instance *kubeclawv1alpha1.ClawInstance) error {
 	cmName := fmt.Sprintf("%s-memory", instance.Name)
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -308,7 +308,7 @@ func (r *ClawInstanceReconciler) cleanupMemoryConfigMap(ctx context.Context, ins
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClawInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&k8sclawv1alpha1.ClawInstance{}).
+		For(&kubeclawv1alpha1.ClawInstance{}).
 		Owns(&appsv1.Deployment{}).
 		Complete(r)
 }

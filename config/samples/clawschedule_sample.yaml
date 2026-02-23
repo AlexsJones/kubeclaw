@@ -1,4 +1,4 @@
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: ClawSchedule
 metadata:
   name: demo-heartbeat

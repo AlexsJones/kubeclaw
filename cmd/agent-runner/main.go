@@ -78,7 +78,7 @@ func main() {
 	if memoryEnabled {
 		memoryInstruction := "\n\nYou have persistent memory. After completing your task, " +
 			"output a memory update block wrapped in markers like this:\n" +
-			"__K8SCLAW_MEMORY__\n<your updated MEMORY.md content>\n__K8SCLAW_MEMORY_END__\n" +
+			"__KUBECLAW_MEMORY__\n<your updated MEMORY.md content>\n__KUBECLAW_MEMORY_END__\n" +
 			"Include key facts, preferences, and context from this and past interactions. " +
 			"Keep it concise (under 256KB). Use markdown format."
 		systemPrompt += memoryInstruction
@@ -145,13 +145,13 @@ func main() {
 	// Print a structured marker to stdout so the controller can extract
 	// the result from pod logs even after the IPC volume is gone.
 	if markerBytes, err := json.Marshal(res); err == nil {
-		fmt.Fprintf(os.Stdout, "\n__K8SCLAW_RESULT__%s__K8SCLAW_END__\n", string(markerBytes))
+		fmt.Fprintf(os.Stdout, "\n__KUBECLAW_RESULT__%s__KUBECLAW_END__\n", string(markerBytes))
 	}
 
 	// Extract and emit memory update if the LLM produced one.
 	if memoryEnabled && res.Response != "" {
 		if memUpdate := extractMemoryUpdate(res.Response); memUpdate != "" {
-			fmt.Fprintf(os.Stdout, "\n__K8SCLAW_MEMORY__%s__K8SCLAW_MEMORY_END__\n", memUpdate)
+			fmt.Fprintf(os.Stdout, "\n__KUBECLAW_MEMORY__%s__KUBECLAW_MEMORY_END__\n", memUpdate)
 			log.Printf("emitted memory update (%d bytes)", len(memUpdate))
 		}
 	}
@@ -306,12 +306,12 @@ func fatal(msg string) {
 // extractMemoryUpdate looks for a memory update block in the LLM response.
 // The agent is instructed to wrap its memory updates in:
 //
-//	__K8SCLAW_MEMORY__
+//	__KUBECLAW_MEMORY__
 //	<content>
-//	__K8SCLAW_MEMORY_END__
+//	__KUBECLAW_MEMORY_END__
 func extractMemoryUpdate(response string) string {
-	const startMarker = "__K8SCLAW_MEMORY__"
-	const endMarker = "__K8SCLAW_MEMORY_END__"
+	const startMarker = "__KUBECLAW_MEMORY__"
+	const endMarker = "__KUBECLAW_MEMORY_END__"
 
 	startIdx := strings.LastIndex(response, startMarker)
 	if startIdx < 0 {

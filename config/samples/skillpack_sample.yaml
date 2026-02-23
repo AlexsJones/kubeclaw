@@ -1,6 +1,6 @@
 ---
 # Example SkillPack
-apiVersion: k8sclaw.io/v1alpha1
+apiVersion: kubeclaw.io/v1alpha1
 kind: SkillPack
 metadata:
   name: code-review
