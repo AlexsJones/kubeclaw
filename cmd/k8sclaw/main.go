@@ -1405,7 +1405,9 @@ type tuiModel struct {
 	deleteFunc        func() (string, error) // the actual delete function
 
 	// Feed
-	feedExpanded bool // fullscreen feed mode
+	feedExpanded     bool // fullscreen feed mode
+	feedInputFocused bool // typing in the feed chat
+	feedInput        textinput.Model
 }
 
 const maxLogLines = 200
@@ -1418,14 +1420,91 @@ func newTUIModel(ns string) tuiModel {
 	ti.PromptStyle = tuiPromptStyle
 	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
 
+	fi := textinput.New()
+	fi.Placeholder = "Type a message..."
+	fi.CharLimit = 512
+	fi.Prompt = "❯ "
+	fi.PromptStyle = tuiPromptStyle
+	fi.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+
 	return tuiModel{
 		namespace:    ns,
 		connected:    k8sClient != nil,
 		input:        ti,
+		feedInput:    fi,
 		inputFocused: false,
 		activeView:   viewInstances,
 		logLines:     []string{tuiDimStyle.Render("K8sClaw TUI ready — press ? for help, / to enter commands")},
 	}
+}
+
+// selectedInstanceForFeed returns the instance name that the feed pane should
+// display runs for, based on the current view and selected row.
+func (m tuiModel) selectedInstanceForFeed() string {
+	switch m.activeView {
+	case viewInstances:
+		if m.selectedRow < len(m.instances) {
+			return m.instances[m.selectedRow].Name
+		}
+	case viewRuns:
+		if m.selectedRow < len(m.runs) {
+			return m.runs[m.selectedRow].Spec.InstanceRef
+		}
+	case viewChannels:
+		filtered := m.filteredChannels()
+		if m.selectedRow < len(filtered) {
+			return filtered[m.selectedRow].InstanceName
+		}
+	case viewPods:
+		filtered := m.filteredPods()
+		if m.selectedRow < len(filtered) {
+			return filtered[m.selectedRow].Instance
+		}
+	}
+	// Fallback: first instance
+	if len(m.instances) > 0 {
+		return m.instances[0].Name
+	}
+	return ""
+}
+
+// runsForInstance returns runs filtered by instance name, oldest-first.
+func (m tuiModel) runsForInstance(instName string) []k8sclawv1alpha1.AgentRun {
+	if instName == "" {
+		return nil
+	}
+	var filtered []k8sclawv1alpha1.AgentRun
+	// m.runs is sorted newest-first; iterate in reverse for oldest-first.
+	for i := len(m.runs) - 1; i >= 0; i-- {
+		if m.runs[i].Spec.InstanceRef == instName {
+			filtered = append(filtered, m.runs[i])
+		}
+	}
+	return filtered
+}
+
+// buildConversationContext assembles the chat history from prior completed runs
+// for the given instance, formatted as a conversation transcript.
+func (m tuiModel) buildConversationContext(instName string) string {
+	runs := m.runsForInstance(instName)
+	if len(runs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Previous conversation:\n")
+	for _, r := range runs {
+		phase := string(r.Status.Phase)
+		sb.WriteString(fmt.Sprintf("User: %s\n", r.Spec.Task))
+		if (phase == "Succeeded" || phase == "Completed") && r.Status.Result != "" {
+			sb.WriteString(fmt.Sprintf("Assistant: %s\n", r.Status.Result))
+		} else if phase == "Failed" {
+			sb.WriteString(fmt.Sprintf("Assistant: [error: %s]\n", r.Status.Error))
+		} else {
+			sb.WriteString("Assistant: [pending]\n")
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -1600,13 +1679,66 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.feedExpanded {
+			// Chat input mode inside feed
+			if m.feedInputFocused {
+				switch msg.Type {
+				case tea.KeyCtrlC:
+					m.quitting = true
+					return m, tea.Quit
+				case tea.KeyEsc:
+					m.feedInputFocused = false
+					m.feedInput.Blur()
+					m.feedInput.SetValue("")
+					return m, nil
+				case tea.KeyEnter:
+					text := strings.TrimSpace(m.feedInput.Value())
+					m.feedInput.SetValue("")
+					if text == "" {
+						return m, nil
+					}
+					inst := m.selectedInstanceForFeed()
+					if inst == "" {
+						m.addLog(tuiErrorStyle.Render("No instance selected"))
+						return m, nil
+					}
+					// Build context from prior runs and create a new chat run
+					context := m.buildConversationContext(inst)
+					ns := m.namespace
+					return m, m.asyncCmd(func() (string, error) {
+						return tuiCreateChatRun(ns, inst, text, context)
+					})
+				}
+				var fiCmd tea.Cmd
+				m.feedInput, fiCmd = m.feedInput.Update(msg)
+				return m, fiCmd
+			}
+			// Not typing — global feed keys
 			switch msg.String() {
-			case "esc", "f", "q":
+			case "esc", "q":
 				m.feedExpanded = false
+				m.feedInputFocused = false
+				m.feedInput.Blur()
+				m.feedInput.SetValue("")
+				return m, nil
+			case "f":
+				m.feedExpanded = false
+				m.feedInputFocused = false
+				m.feedInput.Blur()
+				m.feedInput.SetValue("")
 				return m, nil
 			case "ctrl+c":
 				m.quitting = true
 				return m, tea.Quit
+			case "i", "/", "enter":
+				// Enter chat input mode
+				inst := m.selectedInstanceForFeed()
+				if inst != "" {
+					m.feedInputFocused = true
+					m.feedInput.Focus()
+					m.feedInput.Placeholder = fmt.Sprintf("Chat with %s...", inst)
+					return m, textinput.Blink
+				}
+				return m, nil
 			}
 			return m, nil
 		}
@@ -3263,30 +3395,36 @@ func (m tuiModel) renderLog(logH int) string {
 func (m tuiModel) renderFeed(width, height int) string {
 	var allLines []string
 
-	// Title bar
-	title := " " + tuiFeedTitleStyle.Render("─── Feed ")
+	inst := m.selectedInstanceForFeed()
+
+	// Title bar — show which instance the feed is for
+	titleLabel := "─── Feed "
+	if inst != "" {
+		titleLabel = fmt.Sprintf("─── %s ", inst)
+	}
+	title := " " + tuiFeedTitleStyle.Render(titleLabel)
 	titleW := lipgloss.Width(title)
 	if width > titleW {
 		title += tuiSepStyle.Render(strings.Repeat("─", width-titleW))
 	}
 	allLines = append(allLines, title)
 
-	if len(m.runs) == 0 {
+	runs := m.runsForInstance(inst)
+	if len(runs) == 0 {
 		allLines = append(allLines, "")
 		allLines = append(allLines, tuiDimStyle.Render("  No runs yet"))
-		allLines = append(allLines, tuiDimStyle.Render("  Use /run <instance> <task>"))
+		allLines = append(allLines, tuiDimStyle.Render("  Press f to chat"))
 		for len(allLines) < height {
 			allLines = append(allLines, "")
 		}
 		return padAndJoinLines(allLines, width)
 	}
 
-	// Build feed entries — oldest first (m.runs is sorted newest-first).
-	for i := len(m.runs) - 1; i >= 0; i-- {
-		run := m.runs[i]
+	// Build feed entries — oldest first.
+	for _, run := range runs {
 
-		// Prompt (task) line
-		task := run.Spec.Task
+		// Prompt (task) line — strip conversation context for display
+		task := extractUserMessage(run.Spec.Task)
 		maxTaskW := width - 4
 		if maxTaskW < 10 {
 			maxTaskW = 10
@@ -3365,12 +3503,18 @@ func (m tuiModel) renderFeedFullscreen() string {
 	w := m.width
 	h := m.height
 
+	inst := m.selectedInstanceForFeed()
+
 	var allLines []string
 
-	// Title bar
-	title := " " + tuiFeedTitleStyle.Render("─── Feed (fullscreen) ")
+	// Title bar — show instance name
+	titleLabel := "─── Chat "
+	if inst != "" {
+		titleLabel = fmt.Sprintf("─── Chat: %s ", inst)
+	}
+	title := " " + tuiFeedTitleStyle.Render(titleLabel)
 	titleW := lipgloss.Width(title)
-	hint := tuiDimStyle.Render("  f/Esc to close")
+	hint := tuiDimStyle.Render("  Esc close  i/Enter type")
 	hintW := lipgloss.Width(hint)
 	if w > titleW+hintW {
 		title += tuiSepStyle.Render(strings.Repeat("─", w-titleW-hintW)) + hint
@@ -3379,80 +3523,76 @@ func (m tuiModel) renderFeedFullscreen() string {
 	}
 	allLines = append(allLines, title)
 
-	if len(m.runs) == 0 {
+	runs := m.runsForInstance(inst)
+	if len(runs) == 0 {
 		allLines = append(allLines, "")
-		allLines = append(allLines, tuiDimStyle.Render("  No runs yet"))
-		allLines = append(allLines, tuiDimStyle.Render("  Use /run <instance> <task>"))
-		for len(allLines) < h {
-			allLines = append(allLines, "")
-		}
-		return padAndJoinLines(allLines, w)
-	}
+		allLines = append(allLines, tuiDimStyle.Render("  No messages yet"))
+		allLines = append(allLines, tuiDimStyle.Render("  Press i or Enter to start chatting"))
+	} else {
+		// Build feed entries — oldest first. In fullscreen, show full results.
+		maxResultLines := 40
+		for _, run := range runs {
+			// Show only the user's actual message, not context preamble
+			task := extractUserMessage(run.Spec.Task)
+			maxTaskW := w - 4
+			if maxTaskW < 10 {
+				maxTaskW = 10
+			}
+			if len(task) > maxTaskW {
+				task = task[:maxTaskW-3] + "..."
+			}
+			allLines = append(allLines, tuiFeedPromptStyle.Render(" ▸ "+task))
 
-	// Build feed entries — oldest first. In fullscreen, show more result lines.
-	maxResultLines := 20
-	for i := len(m.runs) - 1; i >= 0; i-- {
-		run := m.runs[i]
+			// Meta line
+			age := shortDuration(time.Since(run.CreationTimestamp.Time))
+			meta := fmt.Sprintf("   %s • %s", truncate(run.Name, w-12), age)
+			allLines = append(allLines, tuiFeedMetaStyle.Render(meta))
 
-		// Prompt line
-		task := run.Spec.Task
-		maxTaskW := w - 4
-		if maxTaskW < 10 {
-			maxTaskW = 10
-		}
-		if len(task) > maxTaskW {
-			task = task[:maxTaskW-3] + "..."
-		}
-		allLines = append(allLines, tuiFeedPromptStyle.Render(" ▸ "+task))
-
-		// Meta line
-		age := shortDuration(time.Since(run.CreationTimestamp.Time))
-		meta := fmt.Sprintf("   %s • %s", truncate(run.Name, w-12), age)
-		allLines = append(allLines, tuiFeedMetaStyle.Render(meta))
-
-		// Result / status
-		phase := string(run.Status.Phase)
-		switch phase {
-		case "Succeeded", "Completed":
-			if run.Status.Result != "" {
-				resultLines := strings.Split(run.Status.Result, "\n")
-				shown := 0
-				for _, rl := range resultLines {
-					if shown >= maxResultLines {
-						remaining := len(resultLines) - shown
-						allLines = append(allLines, tuiDimStyle.Render(fmt.Sprintf("   ┊ ... %d more lines", remaining)))
-						break
+			// Result / status
+			phase := string(run.Status.Phase)
+			switch phase {
+			case "Succeeded", "Completed":
+				if run.Status.Result != "" {
+					resultLines := strings.Split(run.Status.Result, "\n")
+					shown := 0
+					for _, rl := range resultLines {
+						if shown >= maxResultLines {
+							remaining := len(resultLines) - shown
+							allLines = append(allLines, tuiDimStyle.Render(fmt.Sprintf("   ┊ ... %d more lines", remaining)))
+							break
+						}
+						rl = strings.TrimRight(rl, " \t\r")
+						if len(rl) > w-5 {
+							rl = rl[:w-8] + "..."
+						}
+						allLines = append(allLines, tuiSuccessStyle.Render("   "+rl))
+						shown++
 					}
-					rl = strings.TrimRight(rl, " \t\r")
-					if len(rl) > w-5 {
-						rl = rl[:w-8] + "..."
-					}
-					allLines = append(allLines, tuiSuccessStyle.Render("   "+rl))
-					shown++
+				} else {
+					allLines = append(allLines, tuiSuccessStyle.Render("   ✓ Completed"))
 				}
-			} else {
-				allLines = append(allLines, tuiSuccessStyle.Render("   ✓ Completed"))
+			case "Running":
+				allLines = append(allLines, tuiRunningStyle.Render("   ⏳ Running..."))
+			case "Failed", "Timeout":
+				errMsg := run.Status.Error
+				if errMsg == "" {
+					errMsg = phase
+				}
+				if len(errMsg) > w-6 {
+					errMsg = errMsg[:w-9] + "..."
+				}
+				allLines = append(allLines, tuiErrorStyle.Render("   ✗ "+errMsg))
+			default:
+				allLines = append(allLines, tuiDimStyle.Render("   ⏳ Pending..."))
 			}
-		case "Running":
-			allLines = append(allLines, tuiRunningStyle.Render("   ⏳ Running..."))
-		case "Failed", "Timeout":
-			errMsg := run.Status.Error
-			if errMsg == "" {
-				errMsg = phase
-			}
-			if len(errMsg) > w-6 {
-				errMsg = errMsg[:w-9] + "..."
-			}
-			allLines = append(allLines, tuiErrorStyle.Render("   ✗ "+errMsg))
-		default:
-			allLines = append(allLines, tuiDimStyle.Render("   ⏳ Pending..."))
-		}
 
-		allLines = append(allLines, "") // blank separator
+			allLines = append(allLines, "") // blank separator
+		}
 	}
 
-	// Auto-scroll to bottom
-	available := h - 1
+	// Reserve space: title (1) + separator (1) + input (1) + status (1) = 4 lines of chrome
+	inputChrome := 3
+	available := h - 1 - inputChrome
 	if available < 1 {
 		available = 1
 	}
@@ -3465,10 +3605,49 @@ func (m tuiModel) renderFeedFullscreen() string {
 
 	out := []string{allLines[0]}
 	out = append(out, visible...)
-	for len(out) < h {
+	for len(out) < h-inputChrome {
 		out = append(out, "")
 	}
-	return padAndJoinLines(out, w)
+
+	// Separator above input
+	out = append(out, tuiSepStyle.Render(strings.Repeat("─", w)))
+
+	// Chat input line
+	if m.feedInputFocused {
+		m.feedInput.Width = w - 4
+		out = append(out, " "+m.feedInput.View())
+	} else {
+		if inst != "" {
+			out = append(out, tuiDimStyle.Render(" Press i or Enter to type a message"))
+		} else {
+			out = append(out, tuiDimStyle.Render(" Select an instance first"))
+		}
+	}
+
+	// Status bar
+	var statusKeys []string
+	if m.feedInputFocused {
+		statusKeys = []string{"Esc", "cancel", "Enter", "send"}
+	} else {
+		statusKeys = []string{"i/Enter", "type", "Esc/f", "close", "q", "quit"}
+	}
+	var sb strings.Builder
+	for i := 0; i < len(statusKeys)-1; i += 2 {
+		entry := tuiStatusKeyStyle.Render(" "+statusKeys[i]+" ") + tuiStatusBarStyle.Render(statusKeys[i+1]+" ")
+		if lipgloss.Width(sb.String()+entry) > w {
+			break
+		}
+		sb.WriteString(entry)
+	}
+	left := sb.String()
+	lw := lipgloss.Width(left)
+	pad := ""
+	if w > lw {
+		pad = strings.Repeat(" ", w-lw)
+	}
+	out = append(out, lipgloss.NewStyle().Background(lipgloss.Color("#181825")).Render(left+pad))
+
+	return strings.Join(out, "\n")
 }
 
 func padAndJoinLines(lines []string, width int) string {
@@ -3672,6 +3851,29 @@ func tuiCreateRun(ns, instance, task string) (string, error) {
 		return "", fmt.Errorf("create run: %w", err)
 	}
 	return tuiSuccessStyle.Render(fmt.Sprintf("✓ Created AgentRun: %s", runName)), nil
+}
+
+// tuiCreateChatRun creates an AgentRun with conversation context prepended to the task.
+func tuiCreateChatRun(ns, instance, message, conversationCtx string) (string, error) {
+	// Build the full task: conversation context + current message
+	var task string
+	if conversationCtx != "" {
+		task = conversationCtx + "---\nNow respond to the following new message:\n" + message
+	} else {
+		task = message
+	}
+	return tuiCreateRun(ns, instance, task)
+}
+
+// extractUserMessage extracts just the user's latest message from a task that
+// may have conversation context prepended. This is used in the feed display
+// so we show the clean message, not the full context blob.
+func extractUserMessage(task string) string {
+	marker := "---\nNow respond to the following new message:\n"
+	if idx := strings.LastIndex(task, marker); idx >= 0 {
+		return task[idx+len(marker):]
+	}
+	return task
 }
 
 func tuiAbortRun(ns, name string) (string, error) {
