@@ -1,23 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <!-- Gradient for the background -->
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#1E40AF"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#326CE5"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
     </linearGradient>
-    <!-- Lobster body gradient -->
-    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#FF6B4A"/>
-      <stop offset="100%" stop-color="#DC2626"/>
+    <linearGradient id="claw" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF7043"/>
+      <stop offset="100%" stop-color="#D32F2F"/>
     </linearGradient>
-    <!-- Claw gradient -->
-    <linearGradient id="clawGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#FF8A65"/>
-      <stop offset="100%" stop-color="#EF4444"/>
+    <linearGradient id="clawDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E53935"/>
+      <stop offset="100%" stop-color="#B71C1C"/>
     </linearGradient>
-    <!-- Subtle glow -->
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
     <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feGaussianBlur stdDeviation="2" result="blur"/>
       <feMerge>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
@@ -26,141 +25,120 @@
   </defs>
 
   <!-- Background -->
-  <rect fill="url(#bgGrad)" width="512" height="512" rx="80"/>
+  <rect fill="url(#bg)" width="512" height="512" rx="96"/>
 
-  <!-- K8s helm wheel (behind lobster, subtle) -->
-  <g transform="translate(256,268)" opacity="0.15" fill="none" stroke="#FFFFFF" stroke-width="6">
+  <!-- ===== KUBERNETES HELM WHEEL ===== -->
+  <g transform="translate(256,256)" filter="url(#shadow)">
     <!-- Outer ring -->
-    <circle r="190"/>
-    <!-- 7 spokes -->
-    <line x1="0" y1="-190" x2="0" y2="-130"/>
-    <line x1="0" y1="-190" x2="0" y2="-130" transform="rotate(51.43)"/>
-    <line x1="0" y1="-190" x2="0" y2="-130" transform="rotate(102.86)"/>
-    <line x1="0" y1="-190" x2="0" y2="-130" transform="rotate(154.29)"/>
-    <line x1="0" y1="-190" x2="0" y2="-130" transform="rotate(205.71)"/>
-    <line x1="0" y1="-190" x2="0" y2="-130" transform="rotate(257.14)"/>
-    <line x1="0" y1="-190" x2="0" y2="-130" transform="rotate(308.57)"/>
+    <circle r="195" fill="none" stroke="#FFFFFF" stroke-width="12" opacity="0.9"/>
     <!-- Inner ring -->
-    <circle r="120"/>
-    <!-- Spoke end dots -->
-    <circle cx="0" cy="-190" r="12" fill="#FFFFFF" stroke="none"/>
-    <circle cx="148.2" cy="-118.8" r="12" fill="#FFFFFF" stroke="none" />
-    <circle cx="186.7" cy="32.5" r="12" fill="#FFFFFF" stroke="none" />
-    <circle cx="87.5" cy="168.7" r="12" fill="#FFFFFF" stroke="none" />
-    <circle cx="-87.5" cy="168.7" r="12" fill="#FFFFFF" stroke="none" />
-    <circle cx="-186.7" cy="32.5" r="12" fill="#FFFFFF" stroke="none" />
-    <circle cx="-148.2" cy="-118.8" r="12" fill="#FFFFFF" stroke="none" />
+    <circle r="125" fill="none" stroke="#FFFFFF" stroke-width="8" opacity="0.9"/>
+
+    <!-- 7 spokes with paddle ends (Kubernetes style) -->
+    <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="8" opacity="0.9">
+      <!-- Spoke 0 (top) -->
+      <line x1="0" y1="-125" x2="0" y2="-195"/>
+      <circle cx="0" cy="-195" r="16"/>
+      <!-- Spoke 1 -->
+      <line x1="0" y1="-125" x2="0" y2="-195" transform="rotate(51.43)"/>
+      <circle cx="0" cy="-195" r="16" transform="rotate(51.43)"/>
+      <!-- Spoke 2 -->
+      <line x1="0" y1="-125" x2="0" y2="-195" transform="rotate(102.86)"/>
+      <circle cx="0" cy="-195" r="16" transform="rotate(102.86)"/>
+      <!-- Spoke 3 -->
+      <line x1="0" y1="-125" x2="0" y2="-195" transform="rotate(154.29)"/>
+      <circle cx="0" cy="-195" r="16" transform="rotate(154.29)"/>
+      <!-- Spoke 4 -->
+      <line x1="0" y1="-125" x2="0" y2="-195" transform="rotate(205.71)"/>
+      <circle cx="0" cy="-195" r="16" transform="rotate(205.71)"/>
+      <!-- Spoke 5 -->
+      <line x1="0" y1="-125" x2="0" y2="-195" transform="rotate(257.14)"/>
+      <circle cx="0" cy="-195" r="16" transform="rotate(257.14)"/>
+      <!-- Spoke 6 -->
+      <line x1="0" y1="-125" x2="0" y2="-195" transform="rotate(308.57)"/>
+      <circle cx="0" cy="-195" r="16" transform="rotate(308.57)"/>
+    </g>
   </g>
 
-  <!-- === LOBSTER === -->
-  <g filter="url(#glow)">
-
-    <!-- Antennae -->
-    <g fill="none" stroke="#FF8A65" stroke-width="7" stroke-linecap="round">
-      <!-- Left antenna -->
-      <path d="M 216 145 Q 185 90 145 55"/>
-      <path d="M 210 155 Q 160 110 130 85"/>
-      <!-- Right antenna -->
-      <path d="M 296 145 Q 327 90 367 55"/>
-      <path d="M 302 155 Q 352 110 382 85"/>
-    </g>
-    <!-- Antenna tips -->
-    <circle cx="145" cy="55" r="6" fill="#FFAB91"/>
-    <circle cx="130" cy="85" r="5" fill="#FFAB91"/>
-    <circle cx="367" cy="55" r="6" fill="#FFAB91"/>
-    <circle cx="382" cy="85" r="5" fill="#FFAB91"/>
+  <!-- ===== LOBSTER CLAW SILHOUETTE (center of helm) ===== -->
+  <g transform="translate(256,256)" filter="url(#glow)">
 
     <!-- Left claw arm -->
-    <path d="M 200 210 Q 150 195 110 175" fill="none" stroke="url(#clawGrad)" stroke-width="22" stroke-linecap="round"/>
+    <path d="M -12 10 Q -45 -15 -80 -40" fill="none" stroke="url(#claw)" stroke-width="20" stroke-linecap="round"/>
 
-    <!-- Left claw (pincer) -->
-    <g fill="url(#clawGrad)">
-      <!-- Upper pincer -->
-      <path d="M 110 175 Q 95 150 55 125 Q 45 120 50 130 Q 60 150 75 165 Q 65 155 45 145 Q 38 142 42 150 Q 55 170 80 180 Z"/>
-      <!-- Lower pincer -->
-      <path d="M 110 175 Q 100 190 70 210 Q 62 216 68 212 Q 85 200 95 190 Q 82 205 65 218 Q 60 222 66 220 Q 90 210 105 195 Z"/>
-      <!-- Claw base -->
-      <ellipse cx="110" cy="178" rx="22" ry="18"/>
-    </g>
+    <!-- Left pincer - upper jaw -->
+    <path d="M -80 -40 Q -95 -65 -130 -95 Q -140 -100 -138 -92 Q -125 -70 -110 -55 Q -120 -65 -140 -80 Q -148 -85 -142 -78 Q -120 -55 -95 -40 Z" fill="url(#claw)"/>
+    <!-- Left pincer - lower jaw -->
+    <path d="M -80 -40 Q -95 -20 -120 -5 Q -128 0 -122 -2 Q -105 -12 -95 -25 Q -108 -10 -125 2 Q -130 5 -124 3 Q -100 -10 -88 -28 Z" fill="url(#claw)"/>
+    <!-- Left claw joint -->
+    <ellipse cx="-80" cy="-38" rx="18" ry="15" fill="url(#clawDark)"/>
 
     <!-- Right claw arm -->
-    <path d="M 312 210 Q 362 195 402 175" fill="none" stroke="url(#clawGrad)" stroke-width="22" stroke-linecap="round"/>
+    <path d="M 12 10 Q 45 -15 80 -40" fill="none" stroke="url(#claw)" stroke-width="20" stroke-linecap="round"/>
 
-    <!-- Right claw (pincer) -->
-    <g fill="url(#clawGrad)">
-      <!-- Upper pincer -->
-      <path d="M 402 175 Q 417 150 457 125 Q 467 120 462 130 Q 452 150 437 165 Q 447 155 467 145 Q 474 142 470 150 Q 457 170 432 180 Z"/>
-      <!-- Lower pincer -->
-      <path d="M 402 175 Q 412 190 442 210 Q 450 216 444 212 Q 427 200 417 190 Q 430 205 447 218 Q 452 222 446 220 Q 422 210 407 195 Z"/>
-      <!-- Claw base -->
-      <ellipse cx="402" cy="178" rx="22" ry="18"/>
-    </g>
+    <!-- Right pincer - upper jaw -->
+    <path d="M 80 -40 Q 95 -65 130 -95 Q 140 -100 138 -92 Q 125 -70 110 -55 Q 120 -65 140 -80 Q 148 -85 142 -78 Q 120 -55 95 -40 Z" fill="url(#claw)"/>
+    <!-- Right pincer - lower jaw -->
+    <path d="M 80 -40 Q 95 -20 120 -5 Q 128 0 122 -2 Q 105 -12 95 -25 Q 108 -10 125 2 Q 130 5 124 3 Q 100 -10 88 -28 Z" fill="url(#claw)"/>
+    <!-- Right claw joint -->
+    <ellipse cx="80" cy="-38" rx="18" ry="15" fill="url(#clawDark)"/>
 
-    <!-- Body -->
-    <ellipse cx="256" cy="280" rx="68" ry="95" fill="url(#bodyGrad)"/>
+    <!-- Body (compact, centered) -->
+    <ellipse cx="0" cy="25" rx="32" ry="48" fill="url(#clawDark)"/>
 
-    <!-- Shell segments -->
-    <g fill="none" stroke="#B91C1C" stroke-width="2" opacity="0.4">
-      <ellipse cx="256" cy="230" rx="60" ry="10"/>
-      <ellipse cx="256" cy="260" rx="65" ry="10"/>
-      <ellipse cx="256" cy="290" rx="65" ry="10"/>
-      <ellipse cx="256" cy="320" rx="58" ry="10"/>
+    <!-- Shell segment lines -->
+    <g fill="none" stroke="#7F1D1D" stroke-width="1.5" opacity="0.4">
+      <ellipse cx="0" cy="5" rx="28" ry="6"/>
+      <ellipse cx="0" cy="25" rx="30" ry="6"/>
+      <ellipse cx="0" cy="45" rx="26" ry="6"/>
     </g>
 
     <!-- Shell highlight -->
-    <ellipse cx="242" cy="240" rx="18" ry="45" fill="#FF8A65" opacity="0.3"/>
+    <ellipse cx="-8" cy="15" rx="10" ry="28" fill="#FF8A65" opacity="0.25"/>
 
     <!-- Head -->
-    <ellipse cx="256" cy="185" rx="52" ry="40" fill="url(#bodyGrad)"/>
-
-    <!-- Eye stalks -->
-    <ellipse cx="224" cy="158" rx="8" ry="14" fill="#EF4444" transform="rotate(-15 224 158)"/>
-    <ellipse cx="288" cy="158" rx="8" ry="14" fill="#EF4444" transform="rotate(15 288 158)"/>
+    <ellipse cx="0" cy="-10" rx="26" ry="22" fill="url(#clawDark)"/>
 
     <!-- Eyes -->
-    <circle cx="222" cy="148" r="14" fill="#FFFFFF"/>
-    <circle cx="290" cy="148" r="14" fill="#FFFFFF"/>
-    <circle cx="224" cy="147" r="8" fill="#1E293B"/>
-    <circle cx="292" cy="147" r="8" fill="#1E293B"/>
-    <!-- Eye shine -->
-    <circle cx="220" cy="144" r="3.5" fill="#FFFFFF"/>
-    <circle cx="288" cy="144" r="3.5" fill="#FFFFFF"/>
+    <ellipse cx="-16" cy="-24" rx="5" ry="9" fill="#E53935" transform="rotate(-12 -16 -24)"/>
+    <ellipse cx="16" cy="-24" rx="5" ry="9" fill="#E53935" transform="rotate(12 16 -24)"/>
+    <circle cx="-16" cy="-30" r="8" fill="#FFFFFF"/>
+    <circle cx="16" cy="-30" r="8" fill="#FFFFFF"/>
+    <circle cx="-15" cy="-31" r="4.5" fill="#1E293B"/>
+    <circle cx="17" cy="-31" r="4.5" fill="#1E293B"/>
+    <circle cx="-17" cy="-33" r="2" fill="#FFFFFF"/>
+    <circle cx="15" cy="-33" r="2" fill="#FFFFFF"/>
 
-    <!-- Small legs (3 per side) -->
-    <g fill="none" stroke="#DC2626" stroke-width="8" stroke-linecap="round">
-      <!-- Left legs -->
-      <path d="M 205 265 Q 175 280 155 300"/>
-      <path d="M 200 295 Q 168 310 148 335"/>
-      <path d="M 200 325 Q 172 340 155 365"/>
-      <!-- Right legs -->
-      <path d="M 307 265 Q 337 280 357 300"/>
-      <path d="M 312 295 Q 344 310 364 335"/>
-      <path d="M 312 325 Q 340 340 357 365"/>
+    <!-- Antennae -->
+    <g fill="none" stroke="#FF8A65" stroke-width="4" stroke-linecap="round">
+      <path d="M -14 -35 Q -30 -60 -50 -78"/>
+      <path d="M -10 -35 Q -20 -55 -35 -70"/>
+      <path d="M 14 -35 Q 30 -60 50 -78"/>
+      <path d="M 10 -35 Q 20 -55 35 -70"/>
     </g>
-    <!-- Leg tips -->
-    <g fill="#FF6B4A">
-      <circle cx="155" cy="300" r="5"/>
-      <circle cx="148" cy="335" r="5"/>
-      <circle cx="155" cy="365" r="5"/>
-      <circle cx="357" cy="300" r="5"/>
-      <circle cx="364" cy="335" r="5"/>
-      <circle cx="357" cy="365" r="5"/>
+    <circle cx="-50" cy="-78" r="3" fill="#FFAB91"/>
+    <circle cx="-35" cy="-70" r="2.5" fill="#FFAB91"/>
+    <circle cx="50" cy="-78" r="3" fill="#FFAB91"/>
+    <circle cx="35" cy="-70" r="2.5" fill="#FFAB91"/>
+
+    <!-- Small legs -->
+    <g fill="none" stroke="#C62828" stroke-width="5" stroke-linecap="round">
+      <path d="M -22 30 Q -42 38 -55 50"/>
+      <path d="M -20 48 Q -38 58 -50 72"/>
+      <path d="M -18 64 Q -35 75 -48 90"/>
+      <path d="M 22 30 Q 42 38 55 50"/>
+      <path d="M 20 48 Q 38 58 50 72"/>
+      <path d="M 18 64 Q 35 75 48 90"/>
     </g>
 
     <!-- Tail -->
-    <path d="M 256 375 Q 256 400 240 420 Q 230 435 220 445 Q 215 450 225 448 Q 245 440 256 430 Q 267 440 287 448 Q 297 450 292 445 Q 282 435 272 420 Q 256 400 256 375 Z" fill="url(#bodyGrad)"/>
-    <!-- Tail fan -->
-    <g fill="#EF4444" opacity="0.8">
-      <path d="M 256 430 Q 235 445 215 460 Q 210 465 220 462 Q 240 455 256 445 Z"/>
-      <path d="M 256 430 Q 277 445 297 460 Q 302 465 292 462 Q 272 455 256 445 Z"/>
-      <path d="M 256 445 Q 250 465 248 480 Q 247 485 256 480 Q 265 485 264 480 Q 262 465 256 445 Z"/>
+    <path d="M 0 73 Q 0 88 -8 98 Q -14 106 -10 104 Q -2 98 0 92 Q 2 98 10 104 Q 14 106 8 98 Q 0 88 0 73 Z" fill="url(#clawDark)"/>
+
+    <!-- K8s center star (on chest) -->
+    <g transform="translate(0,25)" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.5">
+      <path d="M 0 -8 L 2.5 -2.5 L 8 -2.5 L 3.5 1.5 L 5 8 L 0 4 L -5 8 L -3.5 1.5 L -8 -2.5 L -2.5 -2.5 Z"/>
     </g>
 
-  </g>
-
-  <!-- K8s helm center mark on the lobster's chest -->
-  <g transform="translate(256,280)" fill="none" stroke="#FFFFFF" stroke-width="2.5" opacity="0.5">
-    <path d="M 0 -14 L 4 -4 L 14 -4 L 6 3 L 9 13 L 0 7 L -9 13 L -6 3 L -14 -4 L -4 -4 Z"/>
   </g>
 
 </svg>
