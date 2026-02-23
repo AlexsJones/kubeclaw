@@ -3350,7 +3350,7 @@ func (m tuiModel) View() string {
 	if len(m.suggestions) > 0 {
 		suggestH = min(len(m.suggestions), 6) + 1
 	}
-	chrome := 1 + 1 + 1 + 1 + inputH + suggestH + 1 // header+tabs+sep(above log)+sep(below log)+input+suggest+statusbar
+	chrome := 1 + 1 + 1 + 1 + 1 + inputH + suggestH + 1 // header+tabs+colhdr+sep(above log)+sep(below log)+input+suggest+statusbar
 	available := m.height - chrome
 	if available < 4 {
 		available = 4
@@ -3407,14 +3407,7 @@ func (m tuiModel) View() string {
 
 	if showFeed {
 		rightW := fullWidth - m.width - 1 // 1 for vertical separator
-		// Match the feed height to the left pane after the same trailing-
-		// empty-line trim that joinPanesHorizontally applies.
-		leftLines := strings.Split(base, "\n")
-		if len(leftLines) > 0 && leftLines[len(leftLines)-1] == "" {
-			leftLines = leftLines[:len(leftLines)-1]
-		}
-		feedH := len(leftLines)
-		feedStr := m.renderFeed(rightW, feedH)
+		feedStr := m.renderFeed(rightW, m.height)
 		base = joinPanesHorizontally(base, feedStr, m.width, rightW)
 		m.width = fullWidth // restore for overlay centering
 	}
@@ -4065,10 +4058,6 @@ func (m tuiModel) renderFeed(width, height int) string {
 
 	result := []string{allLines[0]}
 	result = append(result, visible...)
-	// Strictly cap to height — never exceed the allocated space.
-	if len(result) > height {
-		result = result[:height]
-	}
 	for len(result) < height {
 		result = append(result, "")
 	}
