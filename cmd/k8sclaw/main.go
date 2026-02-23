@@ -1816,7 +1816,11 @@ func (m tuiModel) filteredPods() []podRow {
 }
 
 func (m *tuiModel) addLog(s string) {
-	m.logLines = append(m.logLines, s)
+	// Split multi-line output into individual lines so that the log pane
+	// layout (which assumes one visual line per entry) is not broken.
+	for _, line := range strings.Split(s, "\n") {
+		m.logLines = append(m.logLines, line)
+	}
 	if len(m.logLines) > maxLogLines {
 		m.logLines = m.logLines[len(m.logLines)-maxLogLines:]
 	}
@@ -3185,6 +3189,25 @@ func tuiCreateRun(ns, instance, task string) (string, error) {
 		return "", fmt.Errorf("instance %q not found: %w", instance, err)
 	}
 
+	// Resolve provider from instance — check if a known provider name is
+	// embedded in the auth secret name, otherwise default to the model name
+	// pattern.  The onboard wizard names secrets like "<inst>-openai-key".
+	provider := "openai"
+	for _, ref := range inst.Spec.AuthRefs {
+		for _, p := range []string{"anthropic", "azure-openai", "github-copilot", "ollama", "openai"} {
+			if strings.Contains(ref.Secret, p) {
+				provider = p
+				break
+			}
+		}
+	}
+
+	// Resolve auth secret from instance — first AuthRef wins.
+	authSecret := ""
+	if len(inst.Spec.AuthRefs) > 0 {
+		authSecret = inst.Spec.AuthRefs[0].Secret
+	}
+
 	runName := fmt.Sprintf("%s-run-%d", instance, time.Now().Unix())
 	run := &k8sclawv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: ns},
@@ -3192,8 +3215,10 @@ func tuiCreateRun(ns, instance, task string) (string, error) {
 			InstanceRef: instance,
 			Task:        task,
 			Model: k8sclawv1alpha1.ModelSpec{
-				Provider: "openai",
-				Model:    inst.Spec.Agents.Default.Model,
+				Provider:      provider,
+				Model:         inst.Spec.Agents.Default.Model,
+				BaseURL:       inst.Spec.Agents.Default.BaseURL,
+				AuthSecretRef: authSecret,
 			},
 			Timeout: &metav1.Duration{Duration: 10 * time.Minute},
 		},
@@ -3997,6 +4022,8 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 
 	msgs = append(msgs, "")
 	msgs = append(msgs, tuiSuccessStyle.Render("✅ Onboarding complete!"))
+	msgs = append(msgs, "")
+	msgs = append(msgs, tuiDimStyle.Render("Next: press R or type /run "+w.instanceName+" <task> to spawn an agent pod"))
 
 	return strings.Join(msgs, "\n"), nil
 }

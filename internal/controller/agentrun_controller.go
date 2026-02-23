@@ -333,15 +333,6 @@ func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun)
 				{Name: "MODEL_NAME", Value: agentRun.Spec.Model.Model},
 				{Name: "THINKING_MODE", Value: agentRun.Spec.Model.Thinking},
 			},
-			EnvFrom: []corev1.EnvFromSource{
-				{
-					SecretRef: &corev1.SecretEnvSource{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: agentRun.Spec.Model.AuthSecretRef,
-						},
-					},
-				},
-			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "workspace", MountPath: "/workspace"},
 				{Name: "skills", MountPath: "/skills", ReadOnly: true},
@@ -382,6 +373,19 @@ func (r *AgentRunReconciler) buildContainers(agentRun *k8sclawv1alpha1.AgentRun)
 				},
 			},
 		},
+	}
+
+	// Inject auth secret if provided.
+	if agentRun.Spec.Model.AuthSecretRef != "" {
+		containers[0].EnvFrom = []corev1.EnvFromSource{
+			{
+				SecretRef: &corev1.SecretEnvSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: agentRun.Spec.Model.AuthSecretRef,
+					},
+				},
+			},
+		}
 	}
 
 	// Add sandbox sidecar if enabled
