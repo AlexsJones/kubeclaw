@@ -171,6 +171,48 @@ graph TB
 4. **Results flow back** through the IPC bridge → NATS → channel pod → user. The controller extracts structured results and memory updates from pod logs.
 5. **Everything is a Kubernetes resource** — instances, runs, policies, skills, and schedules are all CRDs. Lifecycle is managed by controllers. Access is gated by admission webhooks. Network isolation is enforced by NetworkPolicy. The TUI gives you k9s-style visibility into the entire system.
 
+---
+
+### Built-in Agent Tools
+
+Every agent pod has these tools available out of the box (no skill sidecar required for native tools):
+
+| Tool | Type | Description |
+|------|------|-------------|
+| `execute_command` | IPC (sidecar) | Execute shell commands (`kubectl`, `bash`, `curl`, `jq`, etc.) in the skill sidecar container. Timeout-configurable, working directory support. |
+| `read_file` | Native | Read file contents from the pod filesystem (`/workspace`, `/skills`, `/tmp`, `/ipc`). Truncated at 100 KB. |
+| `write_file` | Native | Create or overwrite files under `/workspace` or `/tmp`. Auto-creates parent directories. |
+| `list_directory` | Native | List directory contents with type, size, and name. |
+| `fetch_url` | Native | Fetch web pages or API endpoints. HTML is converted to readable plain text; JSON returned as-is. Supports custom headers, configurable max chars (default 50k). |
+| `send_channel_message` | IPC (bridge) | Send a message through a connected channel (WhatsApp, Telegram, Discord, Slack). Routes via IPC bridge → NATS → channel pod. |
+
+> **Native** tools run directly in the agent container. **IPC** tools communicate with sidecars or the IPC bridge via the shared `/ipc` volume. See the **[Tool Authoring Guide](docs/writing-tools.md)** for how to add your own.
+
+### Built-in Skills (SkillPacks)
+
+Skills are mounted as files into agent pods and optionally inject sidecar containers with runtime tools. Toggle skills per-instance in the TUI with `s` → `Space`.
+
+| SkillPack | Category | Sidecar | Description | Status |
+|-----------|----------|---------|-------------|--------|
+| `k8s-ops` | Kubernetes | ✅ `kubectl`, `curl`, `jq` | Cluster inspection, workload management, troubleshooting, scaling. Full admin RBAC auto-provisioned per run. | **Stable** |
+| `incident-response` | SRE | ✅ | Structured incident triage — gather context, diagnose root cause, suggest remediation. | **Alpha** |
+| `code-review` | Development | — | Code review guidelines and best practices for pull request analysis. | **Alpha** |
+
+### Channels
+
+Channels connect KubeClaw to external messaging platforms. Each channel runs as a dedicated Kubernetes Deployment. Messages flow through NATS JetStream and are routed to AgentRuns by the channel router.
+
+| Channel | Protocol | Self-chat | Status |
+|---------|----------|-----------|--------|
+| **WhatsApp** | WhatsApp Web (multidevice) via `whatsmeow` | ✅ Owner can message themselves to interact with agents | **Stable** |
+| **Telegram** | Bot API (`tgbotapi`) | — | **Alpha** |
+| **Discord** | Gateway WebSocket (`discordgo`) | — | **Alpha** |
+| **Slack** | Socket Mode (`slack-go`) | — | **Alpha** |
+
+> **Stable** — tested and actively used. **Alpha** — implemented but not yet production-tested.
+
+---
+
 ## Custom Resources
 
 KubeClaw models every agentic concept as a Kubernetes Custom Resource:
