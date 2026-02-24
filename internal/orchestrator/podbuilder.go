@@ -22,15 +22,25 @@ type PodBuilder struct {
 
 	// EventBusURL is the URL of the event bus (NATS).
 	EventBusURL string
+
+	// ImageTag is the image tag to use for all KubeClaw images.
+	ImageTag string
 }
 
+const imageRegistry = "ghcr.io/alexsjones/kubeclaw"
+
 // NewPodBuilder creates a PodBuilder with default settings.
-func NewPodBuilder() *PodBuilder {
+// The tag parameter sets the image tag for all KubeClaw images (e.g. "v0.0.25").
+func NewPodBuilder(tag string) *PodBuilder {
+	if tag == "" {
+		tag = "latest"
+	}
 	return &PodBuilder{
-		DefaultAgentImage:     "ghcr.io/alexsjones/kubeclaw/agent-runner:latest",
-		DefaultIPCBridgeImage: "ghcr.io/alexsjones/kubeclaw/ipc-bridge:latest",
-		DefaultSandboxImage:   "ghcr.io/alexsjones/kubeclaw/sandbox:latest",
+		DefaultAgentImage:     fmt.Sprintf("%s/agent-runner:%s", imageRegistry, tag),
+		DefaultIPCBridgeImage: fmt.Sprintf("%s/ipc-bridge:%s", imageRegistry, tag),
+		DefaultSandboxImage:   fmt.Sprintf("%s/sandbox:%s", imageRegistry, tag),
 		EventBusURL:           "nats://nats.kubeclaw-system.svc:4222",
+		ImageTag:              tag,
 	}
 }
 
@@ -64,7 +74,7 @@ func (pb *PodBuilder) BuildAgentContainer(config AgentPodConfig) corev1.Containe
 	return corev1.Container{
 		Name:            "agent",
 		Image:           pb.DefaultAgentImage,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		SecurityContext: &corev1.SecurityContext{
 			ReadOnlyRootFilesystem:   &readOnly,
 			AllowPrivilegeEscalation: &noPrivEsc,
@@ -115,7 +125,7 @@ func (pb *PodBuilder) BuildIPCBridgeContainer(config AgentPodConfig) corev1.Cont
 	return corev1.Container{
 		Name:            "ipc-bridge",
 		Image:           pb.DefaultIPCBridgeImage,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env: []corev1.EnvVar{
 			{Name: "AGENT_RUN_ID", Value: config.RunID},
 			{Name: "INSTANCE_NAME", Value: config.InstanceName},
@@ -148,7 +158,7 @@ func (pb *PodBuilder) BuildSandboxContainer(config AgentPodConfig) corev1.Contai
 	return corev1.Container{
 		Name:            "sandbox",
 		Image:           image,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		SecurityContext: &corev1.SecurityContext{
 			ReadOnlyRootFilesystem: &readOnly,
 			Capabilities: &corev1.Capabilities{

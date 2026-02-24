@@ -18,6 +18,12 @@ spec:
       content: |
         # Cluster Overview
 
+        You are running inside a Kubernetes pod with full cluster admin access
+        via an in-cluster ServiceAccount token. kubectl works out of the box —
+        do NOT check kubeconfig or contexts. Just run kubectl commands directly.
+        You have RBAC permissions to read all resources cluster-wide and manage
+        workloads in any namespace. Commands like `kubectl get pods -A` work.
+
         When asked to inspect or summarise a Kubernetes cluster, follow these
         steps in order:
 
@@ -140,28 +146,49 @@ spec:
     resources:
       cpu: "100m"
       memory: "128Mi"
-    # Namespace-scoped RBAC: full read + limited write on workloads
+    # Namespace-scoped RBAC: full admin on workloads and core resources
     rbac:
       - apiGroups: [""]
-        resources: ["pods", "pods/log", "services", "configmaps", "secrets", "events", "endpoints", "persistentvolumeclaims"]
-        verbs: ["get", "list", "watch"]
+        resources: ["pods", "pods/log", "pods/exec", "pods/portforward", "services", "configmaps", "secrets", "events", "endpoints", "persistentvolumeclaims", "serviceaccounts", "replicationcontrollers", "resourcequotas", "limitranges"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "statefulsets", "replicasets", "daemonsets", "controllerrevisions"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["batch"]
+        resources: ["jobs", "cronjobs"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["networking.k8s.io"]
+        resources: ["networkpolicies", "ingresses", "ingressclasses"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["autoscaling"]
+        resources: ["horizontalpodautoscalers"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["policy"]
+        resources: ["poddisruptionbudgets"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["roles", "rolebindings"]
+        verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    # Cluster-scoped RBAC: full read + node/namespace management
+    clusterRBAC:
       - apiGroups: [""]
-        resources: ["pods"]
-        verbs: ["delete"]
+        resources: ["nodes", "namespaces", "persistentvolumes", "pods", "pods/log", "services", "configmaps", "secrets", "events", "endpoints"]
+        verbs: ["get", "list", "watch"]
       - apiGroups: ["apps"]
         resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
-        verbs: ["get", "list", "watch", "update", "patch"]
+        verbs: ["get", "list", "watch"]
       - apiGroups: ["batch"]
         resources: ["jobs", "cronjobs"]
         verbs: ["get", "list", "watch"]
       - apiGroups: ["networking.k8s.io"]
-        resources: ["networkpolicies", "ingresses"]
+        resources: ["networkpolicies", "ingresses", "ingressclasses"]
         verbs: ["get", "list", "watch"]
-      - apiGroups: ["autoscaling"]
-        resources: ["horizontalpodautoscalers"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
         verbs: ["get", "list", "watch"]
-    # Cluster-scoped RBAC: read-only on cluster-wide resources
-    clusterRBAC:
-      - apiGroups: [""]
-        resources: ["nodes", "namespaces"]
+      - apiGroups: ["storage.k8s.io"]
+        resources: ["storageclasses", "volumeattachments"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["apiextensions.k8s.io"]
+        resources: ["customresourcedefinitions"]
         verbs: ["get", "list", "watch"]

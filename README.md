@@ -188,12 +188,12 @@ ClawInstance has skills: [k8s-ops]
       → Finds sidecar: { image: skill-k8s-ops, rbac: [...] }
       → Injects sidecar container into pod
       → Creates Role + RoleBinding (namespace-scoped)
-      → Creates ClusterRole + ClusterRoleBinding (read-only cluster access)
+      → Creates ClusterRole + ClusterRoleBinding (cluster-wide access)
     → Pod runs with kubectl + RBAC available
-    → On deletion: cluster-scoped RBAC cleaned up
+    → On completion/deletion: all skill RBAC cleaned up
 ```
 
-The `k8s-ops` built-in skill is the first proof of concept — it provides a sidecar with `kubectl`, `curl`, and `jq` with read access to pods, deployments, nodes, and more. See the **[Skill Authoring Guide](docs/writing-skills.md)** for a full walkthrough of building your own skills. To enable a skill, toggle it on your instance:
+The `k8s-ops` built-in skill is the first proof of concept — it provides a sidecar with `kubectl`, `curl`, and `jq` with full admin access to workload resources (pods, deployments, services, etc.) and cluster-wide read access to nodes, namespaces, and more. See the **[Skill Authoring Guide](docs/writing-skills.md)** for a full walkthrough of building your own skills. To enable a skill, toggle it on your instance:
 
 ```
 # In the TUI: press 's' on an instance → Space to toggle k8s-ops
@@ -211,7 +211,8 @@ KubeClaw enforces defence-in-depth at every layer — from network isolation to 
 | **Pod sandbox** | `SecurityContext` — `runAsNonRoot`, UID 1000, read-only root filesystem | Every agent and sidecar container runs with least privilege |
 | **Admission control** | `ClawPolicy` admission webhook | Feature and tool gates enforced before the pod is created |
 | **Skill RBAC** | Ephemeral `Role`/`ClusterRole` per AgentRun | Each skill declares exactly the API permissions it needs — the controller auto-provisions them at run start and revokes them on completion |
-| **RBAC lifecycle** | `ownerReference` (namespace) + label-based cleanup (cluster) | Namespace RBAC is garbage-collected by Kubernetes. Cluster RBAC is cleaned up by the controller on AgentRun deletion. |
+| **RBAC lifecycle** | `ownerReference` (namespace) + label-based cleanup (cluster) | Namespace RBAC is garbage-collected by Kubernetes. Cluster RBAC is cleaned up by the controller on AgentRun completion and deletion. |
+| **Controller privilege** | `cluster-admin` binding | The controller needs `cluster-admin` to create arbitrary RBAC rules declared by SkillPacks (Kubernetes prevents RBAC escalation otherwise) |
 | **Multi-tenancy** | Namespaced CRDs + Kubernetes RBAC | Instances, runs, and policies are namespace-scoped; standard K8s RBAC controls who can create them |
 
 The skill sidecar RBAC model deserves special attention: permissions are **created on-demand** when an AgentRun starts, scoped to exactly the APIs the skill needs, and **deleted when the run finishes**. There is no standing god-role — each run gets its own short-lived credentials. This is the Kubernetes-native equivalent of temporary IAM session credentials.

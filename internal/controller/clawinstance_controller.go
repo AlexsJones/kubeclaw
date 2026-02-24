@@ -26,8 +26,9 @@ const clawInstanceFinalizer = "kubeclaw.io/finalizer"
 // ClawInstanceReconciler reconciles a ClawInstance object.
 type ClawInstanceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Log    logr.Logger
+	Scheme   *runtime.Scheme
+	Log      logr.Logger
+	ImageTag string // release tag for KubeClaw images
 }
 
 // +kubebuilder:rbac:groups=kubeclaw.io,resources=clawinstances,verbs=get;list;watch;create;update;patch;delete
@@ -154,7 +155,11 @@ func (r *ClawInstanceReconciler) buildChannelDeployment(
 	name string,
 ) *appsv1.Deployment {
 	replicas := int32(1)
-	image := fmt.Sprintf("ghcr.io/alexsjones/kubeclaw/channel-%s:latest", ch.Type)
+	tag := r.ImageTag
+	if tag == "" {
+		tag = "latest"
+	}
+	image := fmt.Sprintf("ghcr.io/alexsjones/kubeclaw/channel-%s:%s", ch.Type, tag)
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -188,7 +193,7 @@ func (r *ClawInstanceReconciler) buildChannelDeployment(
 						{
 							Name:            "channel",
 							Image:           image,
-							ImagePullPolicy: corev1.PullAlways,
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							EnvFrom: []corev1.EnvFromSource{
 								{
 									SecretRef: &corev1.SecretEnvSource{

@@ -510,6 +510,13 @@ func runOnboard() error {
 	if secretEnvKey != "" {
 		apiKey = promptSecret(reader, fmt.Sprintf("  %s", secretEnvKey))
 		if apiKey == "" {
+			// Fall back to environment variable.
+			apiKey = os.Getenv(secretEnvKey)
+			if apiKey != "" {
+				fmt.Printf("  ✓ Using %s from environment\n", secretEnvKey)
+			}
+		}
+		if apiKey == "" {
 			fmt.Println("  ⚠  No API key provided — you can add it later:")
 			fmt.Printf("  kubectl create secret generic %s-%s-key --from-literal=%s=<key>\n",
 				instanceName, providerName, secretEnvKey)
@@ -1623,7 +1630,7 @@ type tuiModel struct {
 	feedCollapsed    bool // hide feed side pane
 	feedInputFocused bool // typing in the feed chat
 	feedInput        textinput.Model
-	feedScrollOffset int  // 0 = pinned to bottom; >0 = scrolled up N lines
+	feedScrollOffset int // 0 = pinned to bottom; >0 = scrolled up N lines
 }
 
 // editMemoryForm holds the editable memory fields for a ClawInstance.
@@ -5410,6 +5417,10 @@ func (m tuiModel) advanceWizard(val string) (tea.Model, tea.Cmd) {
 
 	case wizStepAPIKey:
 		w.apiKey = val
+		// Fall back to environment variable if no key was pasted.
+		if w.apiKey == "" && w.secretEnvKey != "" {
+			w.apiKey = os.Getenv(w.secretEnvKey)
+		}
 		// Try to fetch models from the provider API.
 		w.fetchedModels = nil
 		w.modelFetchErr = ""
@@ -5646,7 +5657,12 @@ func (m tuiModel) renderWizardPanel(h int) string {
 	case wizStepAPIKey:
 		lines = append(lines, stepStyle.Render("  📋 Step 2/5 — AI Provider (continued)"))
 		lines = append(lines, labelStyle.Render(fmt.Sprintf("  Paste your %s:", w.secretEnvKey)))
-		lines = append(lines, hintStyle.Render("  Press Enter to skip — you can add it later."))
+		envVal := os.Getenv(w.secretEnvKey)
+		if envVal != "" {
+			lines = append(lines, hintStyle.Render(fmt.Sprintf("  Press Enter to use %s from environment.", w.secretEnvKey)))
+		} else {
+			lines = append(lines, hintStyle.Render("  Press Enter to skip — you can add it later."))
+		}
 		lines = append(lines, hintStyle.Render("  (providing a key lets us fetch your available models)"))
 
 	case wizStepModel:

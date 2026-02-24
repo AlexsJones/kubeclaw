@@ -36,3 +36,7 @@ __debug_bin*
 # Coverage
 coverage.out
 coverage.html
+main
+
+output.cast
+tmp.gif

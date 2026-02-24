@@ -113,6 +113,14 @@ while true; do
             continue
         fi
 
+        # Atomically claim this request to prevent duplicate processing.
+        # mkdir is atomic on POSIX filesystems — only one process wins.
+        claim_dir="$TOOLS_DIR/.claim-${local_id}"
+        if ! mkdir "$claim_dir" 2>/dev/null; then
+            # Another iteration already claimed it, skip.
+            continue
+        fi
+
         process_request "$req_file" &
     done
 

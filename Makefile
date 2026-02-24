@@ -90,7 +90,7 @@ manifests: controller-gen ## Generate CRD manifests
 docker-build: $(addprefix docker-build-,$(IMAGES)) ## Build all Docker images
 
 docker-build-%: ## Build a specific Docker image
-	docker build -t $(REGISTRY)/$*:$(TAG) -f images/$*/Dockerfile .
+	docker build --build-arg IMAGE_TAG=$(TAG) -t $(REGISTRY)/$*:$(TAG) -f images/$*/Dockerfile .
 
 docker-push: $(addprefix docker-push-,$(IMAGES)) ## Push all Docker images
 

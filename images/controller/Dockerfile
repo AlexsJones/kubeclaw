@@ -1,11 +1,12 @@
 # Controller Manager
 FROM golang:1.24-alpine AS builder
+ARG IMAGE_TAG=latest
 RUN apk add --no-cache git ca-certificates
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /controller ./cmd/controller
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.imageTag=${IMAGE_TAG}" -o /controller ./cmd/controller
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=builder /controller /controller

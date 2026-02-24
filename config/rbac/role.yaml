@@ -92,6 +92,25 @@ subjects:
     name: kubeclaw-controller-manager
     namespace: kubeclaw-system
 ---
+# The controller needs cluster-admin to create arbitrary RBAC for skill
+# sidecars. Kubernetes prevents RBAC escalation — you cannot create a Role
+# granting permissions you don't already hold. Since SkillPacks can define
+# any set of RBAC rules, the controller must be a cluster-admin.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeclaw-controller-cluster-admin
+  labels:
+    app.kubernetes.io/name: kubeclaw
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: kubeclaw-controller-manager
+    namespace: kubeclaw-system
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

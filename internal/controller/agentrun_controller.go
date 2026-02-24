@@ -36,6 +36,18 @@ type AgentRunReconciler struct {
 	Log        logr.Logger
 	PodBuilder *orchestrator.PodBuilder
 	Clientset  kubernetes.Interface
+	ImageTag   string // release tag for KubeClaw images (e.g. "v0.0.25")
+}
+
+const imageRegistry = "ghcr.io/alexsjones/kubeclaw"
+
+// imageRef returns a fully qualified image reference using the reconciler's tag.
+func (r *AgentRunReconciler) imageRef(name string) string {
+	tag := r.ImageTag
+	if tag == "" {
+		tag = "latest"
+	}
+	return fmt.Sprintf("%s/%s:%s", imageRegistry, name, tag)
 }
 
 // +kubebuilder:rbac:groups=kubeclaw.io,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
@@ -69,6 +81,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !controllerutil.ContainsFinalizer(agentRun, agentRunFinalizer) {
 		controllerutil.AddFinalizer(agentRun, agentRunFinalizer)
 		if err := r.Update(ctx, agentRun); err != nil {
+			if errors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
@@ -285,10 +300,18 @@ func (r *AgentRunReconciler) checkAgentContainer(ctx context.Context, log logr.L
 
 // reconcileCompleted handles cleanup of completed AgentRuns.
 func (r *AgentRunReconciler) reconcileCompleted(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (ctrl.Result, error) {
-	if agentRun.Spec.Cleanup == "delete" {
+	// Clean up cluster-scoped RBAC created for skill sidecars.
+	r.cleanupSkillRBAC(ctx, log, agentRun)
+
+	if agentRun.Spec.Cleanup == "delete" && controllerutil.ContainsFinalizer(agentRun, agentRunFinalizer) {
 		log.Info("Cleaning up completed AgentRun")
 		controllerutil.RemoveFinalizer(agentRun, agentRunFinalizer)
 		if err := r.Update(ctx, agentRun); err != nil {
+			if errors.IsConflict(err) {
+				// Object was modified concurrently — controller-runtime
+				// will re-fetch on the next reconcile.
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	}
@@ -464,8 +487,8 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 		// Main agent container
 		{
 			Name:            "agent",
-			Image:           "ghcr.io/alexsjones/kubeclaw/agent-runner:latest",
-			ImagePullPolicy: corev1.PullAlways,
+			Image:           r.imageRef("agent-runner"),
+			ImagePullPolicy: corev1.PullIfNotPresent,
 			SecurityContext: &corev1.SecurityContext{
 				ReadOnlyRootFilesystem:   &readOnly,
 				AllowPrivilegeEscalation: &noPrivEsc,
@@ -504,8 +527,8 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 		// IPC bridge sidecar
 		{
 			Name:            "ipc-bridge",
-			Image:           "ghcr.io/alexsjones/kubeclaw/ipc-bridge:latest",
-			ImagePullPolicy: corev1.PullAlways,
+			Image:           r.imageRef("ipc-bridge"),
+			ImagePullPolicy: corev1.PullIfNotPresent,
 			Env: []corev1.EnvVar{
 				{Name: "AGENT_RUN_ID", Value: agentRun.Name},
 				{Name: "INSTANCE_NAME", Value: agentRun.Spec.InstanceRef},
@@ -552,7 +575,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 
 	// Add sandbox sidecar if enabled
 	if agentRun.Spec.Sandbox != nil && agentRun.Spec.Sandbox.Enabled {
-		sandboxImage := "ghcr.io/alexsjones/kubeclaw/sandbox:latest"
+		sandboxImage := r.imageRef("sandbox")
 		if agentRun.Spec.Sandbox.Image != "" {
 			sandboxImage = agentRun.Spec.Sandbox.Image
 		}
@@ -560,7 +583,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 		containers = append(containers, corev1.Container{
 			Name:            "sandbox",
 			Image:           sandboxImage,
-			ImagePullPolicy: corev1.PullAlways,
+			ImagePullPolicy: corev1.PullIfNotPresent,
 			SecurityContext: &corev1.SecurityContext{
 				ReadOnlyRootFilesystem: &readOnly,
 				Capabilities: &corev1.Capabilities{
@@ -623,7 +646,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 		container := corev1.Container{
 			Name:            fmt.Sprintf("skill-%s", sc.skillPackName),
 			Image:           sc.sidecar.Image,
-			ImagePullPolicy: corev1.PullAlways,
+			ImagePullPolicy: corev1.PullIfNotPresent,
 			Env:             envVars,
 			VolumeMounts:    mounts,
 			Resources: corev1.ResourceRequirements{

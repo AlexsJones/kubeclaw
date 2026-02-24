@@ -23,6 +23,7 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+	imageTag = "latest" // overridden via -ldflags at build time
 )
 
 func init() {
@@ -59,7 +60,7 @@ func main() {
 	}
 
 	// Set up the PodBuilder used by AgentRunReconciler
-	podBuilder := orchestrator.NewPodBuilder()
+	podBuilder := orchestrator.NewPodBuilder(imageTag)
 
 	// Create a kubernetes.Clientset for pod log access.
 	clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
@@ -70,9 +71,10 @@ func main() {
 
 	// Register controllers
 	if err := (&controller.ClawInstanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("controllers").WithName("ClawInstance"),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Log:      ctrl.Log.WithName("controllers").WithName("ClawInstance"),
+		ImageTag: imageTag,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClawInstance")
 		os.Exit(1)
@@ -84,6 +86,7 @@ func main() {
 		Log:        ctrl.Log.WithName("controllers").WithName("AgentRun"),
 		PodBuilder: podBuilder,
 		Clientset:  clientset,
+		ImageTag:   imageTag,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentRun")
 		os.Exit(1)

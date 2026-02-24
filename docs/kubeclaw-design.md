@@ -373,8 +373,10 @@ agent pods at `/skills`.
 `helm`), it declares a `sidecar` spec. The AgentRun controller dynamically injects
 the sidecar container into the agent pod and creates scoped RBAC resources
 (Role/RoleBinding for namespace-scoped access, ClusterRole/ClusterRoleBinding for
-cluster-wide read access). RBAC resources are garbage-collected when the AgentRun
-is deleted.
+cluster-wide access). The controller itself is bound to `cluster-admin` so it can
+create arbitrary RBAC rules declared by SkillPacks without hitting Kubernetes RBAC
+escalation prevention. RBAC resources are garbage-collected when the AgentRun
+completes or is deleted.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -386,7 +388,7 @@ is deleted.
 │  └────┬─────┘  └────┬─────┘  └──────┬───────┘  │
 │       │              │               │          │
 │   /workspace     /ipc            kubectl +      │
-│   /skills        NATS            RBAC access    │
+│   /skills        NATS            full RBAC      │
 │   /ipc                                          │
 │                                                 │
 │  ServiceAccount: kubeclaw-agent                 │
