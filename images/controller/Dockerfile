@@ -1,5 +1,5 @@
 # Controller Manager
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 ARG IMAGE_TAG=latest
 RUN apk add --no-cache git ca-certificates
 WORKDIR /workspace

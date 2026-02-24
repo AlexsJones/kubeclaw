@@ -1,6 +1,6 @@
 # WhatsApp Channel — uses whatsmeow (WhatsApp Web multi-device)
 # Credentials are stored in /data/whatsapp.db — mount a PVC here.
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /workspace
 COPY go.mod go.sum ./
