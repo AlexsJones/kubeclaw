@@ -17,6 +17,7 @@ import (
 
 	kubeclawv1alpha1 "github.com/kubeclaw/kubeclaw/api/v1alpha1"
 	"github.com/kubeclaw/kubeclaw/internal/controller"
+	"github.com/kubeclaw/kubeclaw/internal/eventbus"
 	"github.com/kubeclaw/kubeclaw/internal/orchestrator"
 )
 
@@ -35,12 +36,14 @@ func main() {
 	var metricsAddr string
 	var probeAddr string
 	var enableLeaderElection bool
+	var natsURL string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&natsURL, "nats-url", "", "NATS URL for channel message routing. If empty, reads NATS_URL env var.")
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
@@ -117,6 +120,30 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClawSchedule")
 		os.Exit(1)
+	}
+
+	// --- Channel message router (optional — requires NATS) ---
+	if natsURL == "" {
+		natsURL = os.Getenv("NATS_URL")
+	}
+	if natsURL != "" {
+		eb, err := eventbus.NewNATSEventBus(natsURL)
+		if err != nil {
+			setupLog.Error(err, "unable to connect to NATS — channel routing disabled")
+		} else {
+			router := &controller.ChannelRouter{
+				Client:   mgr.GetClient(),
+				EventBus: eb,
+				Log:      ctrl.Log.WithName("channel-router"),
+			}
+			if err := mgr.Add(router); err != nil {
+				setupLog.Error(err, "unable to add channel router")
+				os.Exit(1)
+			}
+			setupLog.Info("Channel message router enabled", "natsURL", natsURL)
+		}
+	} else {
+		setupLog.Info("No NATS_URL configured — channel message routing disabled")
 	}
 
 	// Health checks

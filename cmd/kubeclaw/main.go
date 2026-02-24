@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -1890,7 +1891,7 @@ func (m tuiModel) Init() tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -1903,49 +1904,86 @@ func refreshDataCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		var inst kubeclawv1alpha1.ClawInstanceList
-		var runs kubeclawv1alpha1.AgentRunList
-		var pols kubeclawv1alpha1.ClawPolicyList
-		var skls kubeclawv1alpha1.SkillPackList
+		var (
+			inst   kubeclawv1alpha1.ClawInstanceList
+			runs   kubeclawv1alpha1.AgentRunList
+			pols   kubeclawv1alpha1.ClawPolicyList
+			skls   kubeclawv1alpha1.SkillPackList
+			scheds kubeclawv1alpha1.ClawScheduleList
+			podList corev1.PodList
+		)
 
-		// Fetch resources — track errors so the TUI can surface them.
+		var mu sync.Mutex
 		var errs []string
+		addErr := func(e string) {
+			mu.Lock()
+			errs = append(errs, e)
+			mu.Unlock()
+		}
+
+		// Fetch all resources in parallel.
+		var wg sync.WaitGroup
+		wg.Add(6)
+
+		go func() {
+			defer wg.Done()
+			if err := k8sClient.List(ctx, &inst); err != nil {
+				addErr(fmt.Sprintf("instances: %v", err))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := k8sClient.List(ctx, &runs); err != nil {
+				addErr(fmt.Sprintf("runs: %v", err))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := k8sClient.List(ctx, &pols); err != nil {
+				addErr(fmt.Sprintf("policies: %v", err))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := k8sClient.List(ctx, &skls); err != nil {
+				addErr(fmt.Sprintf("skills: %v", err))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := k8sClient.List(ctx, &scheds); err != nil {
+				addErr(fmt.Sprintf("schedules: %v", err))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := k8sClient.List(ctx, &podList, client.MatchingLabels{"app.kubernetes.io/managed-by": "kubeclaw"}); err != nil {
+				addErr(fmt.Sprintf("pods: %v", err))
+			}
+		}()
+
+		wg.Wait()
+
+		// Build the message from fetched data.
 		var msg dataRefreshMsg
 
-		if err := k8sClient.List(ctx, &inst); err != nil {
-			errs = append(errs, fmt.Sprintf("instances: %v", err))
-		} else {
+		if len(inst.Items) > 0 || !containsPrefix(errs, "instances:") {
 			msg.instances = &inst.Items
 		}
-		if err := k8sClient.List(ctx, &runs); err != nil {
-			errs = append(errs, fmt.Sprintf("runs: %v", err))
-		} else {
+		if !containsPrefix(errs, "runs:") {
 			sort.Slice(runs.Items, func(i, j int) bool {
 				return runs.Items[i].CreationTimestamp.After(runs.Items[j].CreationTimestamp.Time)
 			})
 			msg.runs = &runs.Items
 		}
-		if err := k8sClient.List(ctx, &pols); err != nil {
-			errs = append(errs, fmt.Sprintf("policies: %v", err))
-		} else {
+		if !containsPrefix(errs, "policies:") {
 			msg.policies = &pols.Items
 		}
-		if err := k8sClient.List(ctx, &skls); err != nil {
-			errs = append(errs, fmt.Sprintf("skills: %v", err))
-		} else {
+		if !containsPrefix(errs, "skills:") {
 			msg.skills = &skls.Items
 		}
-
-		// Fetch schedules.
-		var scheds kubeclawv1alpha1.ClawScheduleList
-		if err := k8sClient.List(ctx, &scheds); err != nil {
-			errs = append(errs, fmt.Sprintf("schedules: %v", err))
-		} else {
+		if !containsPrefix(errs, "schedules:") {
 			msg.schedules = &scheds.Items
-		}
-
-		if len(errs) > 0 {
-			msg.fetchErr = strings.Join(errs, "; ")
 		}
 
 		// Build channel rows from instances.
@@ -1975,10 +2013,7 @@ func refreshDataCmd() tea.Cmd {
 
 		// Build pod rows from actual pods labelled for kubeclaw.
 		var podRows []podRow
-		var podList corev1.PodList
-		if err := k8sClient.List(ctx, &podList, client.MatchingLabels{"app.kubernetes.io/managed-by": "kubeclaw"}); err != nil {
-			errs = append(errs, fmt.Sprintf("pods: %v", err))
-		} else {
+		if !containsPrefix(errs, "pods:") {
 			for _, p := range podList.Items {
 				instName := p.Labels["kubeclaw.io/instance"]
 				var restarts int32
@@ -2001,7 +2036,6 @@ func refreshDataCmd() tea.Cmd {
 			if r.Status.PodName == "" {
 				continue
 			}
-			// Check if already in podRows.
 			var found bool
 			for _, pr := range podRows {
 				if pr.Name == r.Status.PodName {
@@ -2036,6 +2070,16 @@ func refreshDataCmd() tea.Cmd {
 		}
 		return msg
 	}
+}
+
+// containsPrefix checks if any string in the slice starts with the given prefix.
+func containsPrefix(ss []string, prefix string) bool {
+	for _, s := range ss {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Update ───────────────────────────────────────────────────────────────────
@@ -6036,7 +6080,7 @@ func (m tuiModel) renderWizardPanel(h int) string {
 			lines = append(lines, menuStyle.Render("  Settings → Linked Devices → Link a Device"))
 			lines = append(lines, "")
 			for _, qrLine := range w.qrLines {
-				lines = append(lines, "  "+qrLine)
+				lines = append(lines, "  "+strings.TrimRight(qrLine, " "))
 			}
 		case "error":
 			lines = append(lines, menuStyle.Render("  ⏳ Waiting for pod... (retrying)"))
@@ -6253,7 +6297,7 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 		},
 		Spec: kubeclawv1alpha1.ClawScheduleSpec{
 			InstanceRef:       w.instanceName,
-			Schedule:          "*/5 * * * *",
+			Schedule:          "0 * * * *",
 			Task:              "Review your memory. Summarise what you know so far and note anything that needs attention.",
 			Type:              "heartbeat",
 			ConcurrencyPolicy: "Forbid",
@@ -6272,7 +6316,7 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 			return "", fmt.Errorf("create heartbeat schedule: %w", err)
 		}
 	} else {
-		msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Created heartbeat: %s (every 5m, reviews memory)", heartbeatName)))
+		msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Created heartbeat: %s (every hour, reviews memory)", heartbeatName)))
 	}
 
 	msgs = append(msgs, "")

@@ -4,7 +4,7 @@ metadata:
   name: demo-heartbeat
 spec:
   instanceRef: demo
-  schedule: "*/5 * * * *"
+  schedule: "0 * * * *"
   task: "Check in: summarize what you remember about the user and note any pending tasks."
   type: heartbeat
   includeMemory: true

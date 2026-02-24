@@ -66,7 +66,7 @@ func main() {
 	defer bus.Close()
 
 	// Initialise whatsmeow SQLite store
-	dbPath := fmt.Sprintf("file:%s/whatsapp.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)", dataDir)
+	dbPath := fmt.Sprintf("file:%s/whatsapp.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dataDir)
 	container, err := sqlstore.New(context.Background(), "sqlite", dbPath, waLogger)
 	if err != nil {
 		log.Error(err, "failed to open credential store", "path", dbPath)
@@ -113,7 +113,12 @@ func main() {
 				fmt.Println("║  Scan this QR code in WhatsApp:          ║")
 				fmt.Println("║  Settings → Linked Devices → Link Device ║")
 				fmt.Println("╚══════════════════════════════════════════╝")
-				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				qrterminal.GenerateWithConfig(evt.Code, qrterminal.Config{
+					Level:      qrterminal.L,
+					Writer:     os.Stdout,
+					HalfBlocks: true,
+					QuietZone:  1,
+				})
 				fmt.Println()
 			case "success":
 				log.Info("WhatsApp device linked successfully!")
@@ -187,8 +192,17 @@ func (wc *WhatsAppChannel) eventHandler(evt interface{}) {
 
 // handleInboundMessage processes a received WhatsApp message.
 func (wc *WhatsAppChannel) handleInboundMessage(evt *events.Message) {
-	// Skip status broadcasts and own messages
-	if evt.Info.Chat.Server == "broadcast" || evt.Info.IsFromMe {
+	// Log all incoming messages for debugging.
+	fmt.Fprintf(os.Stderr, "WA event: from=%s chat=%s isFromMe=%t isGroup=%t server=%s text=%q\n",
+		evt.Info.Sender.String(), evt.Info.Chat.String(), evt.Info.IsFromMe, evt.Info.IsGroup, evt.Info.Chat.Server,
+		truncateText(extractText(evt.Message), 50))
+
+	// Only process messages from the device owner (self-chat mode).
+	// Skip status broadcasts, group chats, and messages from other people.
+	if evt.Info.Chat.Server == "broadcast" {
+		return
+	}
+	if !evt.Info.IsFromMe {
 		return
 	}
 
@@ -199,12 +213,9 @@ func (wc *WhatsAppChannel) handleInboundMessage(evt *events.Message) {
 
 	senderName := evt.Info.PushName
 	senderID := evt.Info.Sender.User
-	chatID := evt.Info.Chat.User
-
-	// For group chats, include group JID as chatID
-	if evt.Info.IsGroup {
-		chatID = evt.Info.Chat.String()
-	}
+	// Always use the full JID string (including @lid or @s.whatsapp.net)
+	// so replies resolve to the correct server.
+	chatID := evt.Info.Chat.String()
 
 	msg := channel.InboundMessage{
 		SenderID:   senderID,
@@ -251,11 +262,26 @@ func (wc *WhatsAppChannel) handleOutbound(ctx context.Context) {
 }
 
 // sendMessage sends a text message via WhatsApp.
+// If ChatID is empty, the message is sent to the device owner (self-chat).
 func (wc *WhatsAppChannel) sendMessage(ctx context.Context, msg channel.OutboundMessage) error {
-	jid := resolveJID(msg.ChatID)
+	var jid types.JID
+	if msg.ChatID == "" {
+		// Self-chat: send to the linked device's own LID.
+		ownLID := wc.client.Store.LID
+		if !ownLID.IsEmpty() {
+			jid = types.NewJID(ownLID.User, ownLID.Server)
+		} else if wc.client.Store.ID != nil {
+			jid = types.NewJID(wc.client.Store.ID.User, types.DefaultUserServer)
+		} else {
+			return fmt.Errorf("cannot send self-message: device not linked")
+		}
+	} else {
+		jid = resolveJID(msg.ChatID)
+	}
 
+	text := fmt.Sprintf("[%s] %s", wc.InstanceName, msg.Text)
 	_, err := wc.client.SendMessage(ctx, jid, &waE2E.Message{
-		Conversation: proto.String(msg.Text),
+		Conversation: proto.String(text),
 	})
 	return err
 }
@@ -300,4 +326,11 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func truncateText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

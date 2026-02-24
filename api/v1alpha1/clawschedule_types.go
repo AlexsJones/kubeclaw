@@ -9,7 +9,7 @@ type ClawScheduleSpec struct {
 	// InstanceRef is the name of the ClawInstance this schedule belongs to.
 	InstanceRef string `json:"instanceRef"`
 
-	// Schedule is a cron expression (e.g. "*/5 * * * *").
+	// Schedule is a cron expression (e.g. "0 * * * *").
 	Schedule string `json:"schedule"`
 
 	// Task is the task description sent to the agent on each trigger.

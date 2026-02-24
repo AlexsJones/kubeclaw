@@ -72,11 +72,13 @@ type ExecResult struct {
 }
 
 // OutboundMessage is written to /ipc/messages/send-*.json for channel delivery.
+// Field names align with channel.OutboundMessage so the bridge can relay the
+// JSON directly without remapping.
 type OutboundMessage struct {
-	Channel  string          `json:"channel"` // "telegram", "whatsapp", etc.
-	Target   string          `json:"target"`  // Chat ID, group ID, etc.
+	Channel  string          `json:"channel"`            // "telegram", "whatsapp", etc.
+	ChatID   string          `json:"chatId,omitempty"`   // Chat/group ID; empty = owner/self
 	Text     string          `json:"text"`
-	Format   string          `json:"format,omitempty"` // "plain", "markdown", "html"
+	Format   string          `json:"format,omitempty"`   // "plain", "markdown", "html"
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 

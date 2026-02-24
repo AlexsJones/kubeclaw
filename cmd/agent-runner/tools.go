@@ -12,9 +12,10 @@ import (
 
 // Tool name constants.
 const (
-	ToolExecuteCommand = "execute_command"
-	ToolReadFile       = "read_file"
-	ToolListDirectory  = "list_directory"
+	ToolExecuteCommand    = "execute_command"
+	ToolReadFile          = "read_file"
+	ToolListDirectory     = "list_directory"
+	ToolSendChannelMessage = "send_channel_message"
 )
 
 // ToolDef describes a tool for LLM function calling.
@@ -80,6 +81,31 @@ func defaultTools() []ToolDef {
 				"required": []string{"path"},
 			},
 		},
+		{
+			Name: ToolSendChannelMessage,
+			Description: "Send a message to the user via a connected channel (e.g. WhatsApp, Telegram, Discord, Slack). " +
+				"Use this when the user asks you to notify them, send a summary, or deliver any text outside of the task result. " +
+				"If no chatId is provided the message is sent to the device owner (self-chat).",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"channel": map[string]any{
+						"type":        "string",
+						"description": "Channel type to send through: whatsapp, telegram, discord, or slack.",
+						"enum":        []string{"whatsapp", "telegram", "discord", "slack"},
+					},
+					"text": map[string]any{
+						"type":        "string",
+						"description": "The message text to send.",
+					},
+					"chatId": map[string]any{
+						"type":        "string",
+						"description": "Target chat or group ID. Leave empty to send to the device owner (self-chat).",
+					},
+				},
+				"required": []string{"channel", "text"},
+			},
+		},
 	}
 }
 
@@ -99,6 +125,8 @@ func executeToolCall(name string, argsJSON string) string {
 		return readFileTool(args)
 	case ToolListDirectory:
 		return listDirectoryTool(args)
+	case ToolSendChannelMessage:
+		return sendChannelMessageTool(args)
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name)
 	}
@@ -162,6 +190,52 @@ func listDirectoryTool(args map[string]any) string {
 		sb.WriteString(fmt.Sprintf("%-6s %8d  %s\n", kind, size, entry.Name()))
 	}
 	return sb.String()
+}
+
+// sendChannelMessageTool writes an outbound message to /ipc/messages/ for the
+// IPC bridge to relay to the target channel (WhatsApp, Telegram, etc.).
+func sendChannelMessageTool(args map[string]any) string {
+	channel, _ := args["channel"].(string)
+	text, _ := args["text"].(string)
+	chatID, _ := args["chatId"].(string)
+
+	if channel == "" {
+		return "Error: 'channel' is required (whatsapp, telegram, discord, slack)"
+	}
+	if text == "" {
+		return "Error: 'text' is required"
+	}
+
+	msg := struct {
+		Channel string `json:"channel"`
+		ChatID  string `json:"chatId,omitempty"`
+		Text    string `json:"text"`
+	}{
+		Channel: channel,
+		ChatID:  chatID,
+		Text:    text,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Sprintf("Error marshalling message: %v", err)
+	}
+
+	dir := "/ipc/messages"
+	_ = os.MkdirAll(dir, 0o755)
+	id := fmt.Sprintf("%d", time.Now().UnixNano())
+	path := filepath.Join(dir, fmt.Sprintf("send-%s.json", id))
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Sprintf("Error writing message file: %v", err)
+	}
+
+	log.Printf("Wrote channel message: channel=%s chatId=%s len=%d", channel, chatID, len(text))
+	target := chatID
+	if target == "" {
+		target = "owner (self)"
+	}
+	return fmt.Sprintf("Message sent to %s channel (target: %s)", channel, target)
 }
 
 // --- IPC-based command execution (runs in the sidecar container) ---

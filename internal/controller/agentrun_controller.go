@@ -303,16 +303,23 @@ func (r *AgentRunReconciler) reconcileCompleted(ctx context.Context, log logr.Lo
 	// Clean up cluster-scoped RBAC created for skill sidecars.
 	r.cleanupSkillRBAC(ctx, log, agentRun)
 
-	if agentRun.Spec.Cleanup == "delete" && controllerutil.ContainsFinalizer(agentRun, agentRunFinalizer) {
-		log.Info("Cleaning up completed AgentRun")
-		controllerutil.RemoveFinalizer(agentRun, agentRunFinalizer)
-		if err := r.Update(ctx, agentRun); err != nil {
-			if errors.IsConflict(err) {
-				// Object was modified concurrently — controller-runtime
-				// will re-fetch on the next reconcile.
-				return ctrl.Result{Requeue: true}, nil
+	if agentRun.Spec.Cleanup == "delete" {
+		if controllerutil.ContainsFinalizer(agentRun, agentRunFinalizer) {
+			log.Info("Cleaning up completed AgentRun")
+			controllerutil.RemoveFinalizer(agentRun, agentRunFinalizer)
+			if err := r.Update(ctx, agentRun); err != nil {
+				if errors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
+				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, err
+		}
+		// Delete the AgentRun CR now that the finalizer is removed.
+		log.Info("Deleting completed AgentRun", "name", agentRun.Name)
+		if err := r.Delete(ctx, agentRun); err != nil {
+			if !errors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 	return ctrl.Result{}, nil
