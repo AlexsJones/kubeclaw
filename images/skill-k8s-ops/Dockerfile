@@ -16,9 +16,12 @@ RUN apk add --no-cache \
        -o /usr/local/bin/kubectl \
     && chmod +x /usr/local/bin/kubectl
 
+COPY tool-executor.sh /usr/local/bin/tool-executor.sh
+RUN chmod +x /usr/local/bin/tool-executor.sh
+
 USER 1000
 WORKDIR /workspace
 
-# The agent controller sets the command; default to sleep so the
-# sidecar stays alive for the lifetime of the agent run.
-CMD ["sleep", "infinity"]
+# The tool executor watches /ipc/tools/ for exec-request JSON files,
+# executes them, and writes exec-result JSON files back.
+CMD ["/usr/local/bin/tool-executor.sh"]

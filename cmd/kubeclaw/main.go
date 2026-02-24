@@ -763,7 +763,10 @@ spec:
 %s  agents:
     default:
       model: %s
-%s%s%s`, name, ns, channelsBlock, model, baseURLLine, authRefsBlock, policyBlock)
+%s%s%s  memory:
+    enabled: true
+    maxSizeKB: 256
+`, name, ns, channelsBlock, model, baseURLLine, authRefsBlock, policyBlock)
 }
 
 func kubectlApplyStdin(yaml string) error {
@@ -927,7 +930,7 @@ func runInstall(ver string) error {
 	}
 
 	fmt.Println("\n  KubeClaw installed successfully!")
-	fmt.Println("  Run: kubectl get pods -n kubeclaw-system")
+	fmt.Println("  Run: kubeclaw")
 	return nil
 }
 
@@ -2849,16 +2852,16 @@ func (m tuiModel) handleRowEdit() (tea.Model, tea.Cmd) {
 				maxSizeKB:    fmt.Sprintf("%d", inst.Spec.Memory.MaxSizeKB),
 				systemPrompt: inst.Spec.Memory.SystemPrompt,
 			}
-		} else {
+			} else {
 			m.editMemory = editMemoryForm{
-				enabled:   false,
+				enabled:   true,
 				maxSizeKB: "256",
 			}
 		}
 		// Find first schedule for this instance to pre-populate heartbeat tab.
 		m.editHeartbeat = editHeartbeatForm{
 			schedule:          "*/5 * * * *",
-			task:              "check status",
+			task:              "Review your memory. Summarise what you know so far and note anything that needs attention.",
 			schedType:         0,
 			concurrencyPolicy: 0,
 			includeMemory:     true,
@@ -3814,7 +3817,7 @@ func (m tuiModel) renderTable(tableH int) string {
 func (m tuiModel) renderInstancesTable(tableH int) string {
 	var b strings.Builder
 
-	header := fmt.Sprintf(" %-22s %-12s %-20s %-8s %-8s", "NAME", "PHASE", "CHANNELS", "PODS", "AGE")
+	header := fmt.Sprintf(" %-22s %-12s %-20s %-20s %-8s %-8s", "NAME", "PHASE", "CHANNELS", "SKILLS", "PODS", "AGE")
 	b.WriteString(tuiColHeaderStyle.Render(padRight(header, m.width)))
 	b.WriteString("\n")
 
@@ -3841,8 +3844,22 @@ func (m tuiModel) renderInstancesTable(tableH int) string {
 			chStr = "-"
 		}
 
-		row := fmt.Sprintf(" %-22s %-12s %-20s %-8d %-8s",
-			truncate(inst.Name, 22), inst.Status.Phase, truncate(chStr, 20), inst.Status.ActiveAgentPods, age)
+		// Build skills column from SkillRef list.
+		skillNames := make([]string, 0, len(inst.Spec.Skills))
+		for _, sk := range inst.Spec.Skills {
+			if sk.SkillPackRef != "" {
+				skillNames = append(skillNames, sk.SkillPackRef)
+			} else if sk.ConfigMapRef != "" {
+				skillNames = append(skillNames, sk.ConfigMapRef)
+			}
+		}
+		skillStr := strings.Join(skillNames, ",")
+		if skillStr == "" {
+			skillStr = "-"
+		}
+
+		row := fmt.Sprintf(" %-22s %-12s %-20s %-20s %-8d %-8s",
+			truncate(inst.Name, 22), inst.Status.Phase, truncate(chStr, 20), truncate(skillStr, 20), inst.Status.ActiveAgentPods, age)
 
 		b.WriteString(m.styleRow(idx, row))
 		b.WriteString("\n")
@@ -5878,6 +5895,12 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 		inst.Spec.PolicyRef = policyName
 	}
 
+	// Memory is on by default.
+	inst.Spec.Memory = &kubeclawv1alpha1.MemorySpec{
+		Enabled:   true,
+		MaxSizeKB: 256,
+	}
+
 	// Try create; if it exists, update.
 	if err := k8sClient.Create(ctx, inst); err != nil {
 		var existing kubeclawv1alpha1.ClawInstance
@@ -5892,6 +5915,37 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 		}
 	} else {
 		msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Created ClawInstance: %s", w.instanceName)))
+	}
+
+	// 5. Create a default heartbeat schedule that reviews memory.
+	heartbeatName := fmt.Sprintf("%s-heartbeat", w.instanceName)
+	heartbeat := &kubeclawv1alpha1.ClawSchedule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      heartbeatName,
+			Namespace: ns,
+		},
+		Spec: kubeclawv1alpha1.ClawScheduleSpec{
+			InstanceRef:       w.instanceName,
+			Schedule:          "*/5 * * * *",
+			Task:              "Review your memory. Summarise what you know so far and note anything that needs attention.",
+			Type:              "heartbeat",
+			ConcurrencyPolicy: "Forbid",
+			IncludeMemory:     true,
+		},
+	}
+	if err := k8sClient.Create(ctx, heartbeat); err != nil {
+		var existingSched kubeclawv1alpha1.ClawSchedule
+		if getErr := k8sClient.Get(ctx, types.NamespacedName{Name: heartbeatName, Namespace: ns}, &existingSched); getErr == nil {
+			existingSched.Spec = heartbeat.Spec
+			if err2 := k8sClient.Update(ctx, &existingSched); err2 != nil {
+				return "", fmt.Errorf("update heartbeat schedule: %w", err2)
+			}
+			msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Updated heartbeat: %s", heartbeatName)))
+		} else {
+			return "", fmt.Errorf("create heartbeat schedule: %w", err)
+		}
+	} else {
+		msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Created heartbeat: %s (every 5m, reviews memory)", heartbeatName)))
 	}
 
 	msgs = append(msgs, "")

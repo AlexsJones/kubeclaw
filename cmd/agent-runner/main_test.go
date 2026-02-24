@@ -213,7 +213,7 @@ func TestCallOpenAI_MockServer(t *testing.T) {
 	defer srv.Close()
 
 	ctx := t.Context()
-	text, inTok, outTok, err := callOpenAI(ctx, "openai", "test-key", srv.URL, "gpt-4o-mini", "You are helpful.", "Say hello")
+	text, inTok, outTok, _, err := callOpenAI(ctx, "openai", "test-key", srv.URL, "gpt-4o-mini", "You are helpful.", "Say hello", nil)
 	if err != nil {
 		t.Fatalf("callOpenAI error: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestCallOpenAI_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	ctx := t.Context()
-	_, _, _, err := callOpenAI(ctx, "openai", "bad-key", srv.URL, "gpt-4", "sys", "task")
+	_, _, _, _, err := callOpenAI(ctx, "openai", "bad-key", srv.URL, "gpt-4", "sys", "task", nil)
 	if err == nil {
 		t.Fatal("expected error for 401 response")
 	}
@@ -289,7 +289,7 @@ func TestCallAnthropic_MockServer(t *testing.T) {
 	defer srv.Close()
 
 	ctx := t.Context()
-	text, inTok, outTok, err := callAnthropic(ctx, "test-anthropic-key", srv.URL, "claude-sonnet-4-20250514", "Be helpful.", "Say hello")
+	text, inTok, outTok, _, err := callAnthropic(ctx, "test-anthropic-key", srv.URL, "claude-sonnet-4-20250514", "Be helpful.", "Say hello", nil)
 	if err != nil {
 		t.Fatalf("callAnthropic error: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestCallAnthropic_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	ctx := t.Context()
-	_, _, _, err := callAnthropic(ctx, "bad-key", srv.URL, "claude-sonnet-4-20250514", "sys", "task")
+	_, _, _, _, err := callAnthropic(ctx, "bad-key", srv.URL, "claude-sonnet-4-20250514", "sys", "task", nil)
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
@@ -332,7 +332,7 @@ func TestCallAnthropic_ServerError(t *testing.T) {
 
 func TestCallOpenAI_AzureRequiresBaseURL(t *testing.T) {
 	ctx := t.Context()
-	_, _, _, err := callOpenAI(ctx, "azure-openai", "key", "", "gpt-4", "sys", "task")
+	_, _, _, _, err := callOpenAI(ctx, "azure-openai", "key", "", "gpt-4", "sys", "task", nil)
 	if err == nil {
 		t.Fatal("expected error when azure-openai has no base URL")
 	}
@@ -374,12 +374,12 @@ func TestProviderRouting(t *testing.T) {
 
 	ctx := t.Context()
 
-	callOpenAI(ctx, "openai", "k", openaiSrv.URL, "m", "s", "t")
+	callOpenAI(ctx, "openai", "k", openaiSrv.URL, "m", "s", "t", nil)
 	if !openAICalled {
 		t.Error("expected OpenAI server to be called for openai provider")
 	}
 
-	callAnthropic(ctx, "k", anthropicSrv.URL, "m", "s", "t")
+	callAnthropic(ctx, "k", anthropicSrv.URL, "m", "s", "t", nil)
 	if !anthropicCalled {
 		t.Error("expected Anthropic server to be called for anthropic provider")
 	}

@@ -136,7 +136,6 @@ spec:
     minCPU: 100m
   sidecar:
     image: ghcr.io/alexsjones/kubeclaw/skill-k8s-ops:latest
-    command: ["sleep", "infinity"]
     mountWorkspace: true
     resources:
       cpu: "100m"

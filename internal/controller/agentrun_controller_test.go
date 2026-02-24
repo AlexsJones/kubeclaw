@@ -492,8 +492,20 @@ func TestBuildContainers_SkillSidecarDefaultCommand(t *testing.T) {
 	}
 	cs := r.buildContainers(newTestRun(), false, sidecars)
 	sc := cs[2]
-	if len(sc.Command) != 2 || sc.Command[0] != "sleep" || sc.Command[1] != "infinity" {
-		t.Errorf("sidecar command = %v, want [sleep infinity]", sc.Command)
+	// When no command is specified in the SkillPack, the container should
+	// have no Command override so the image's default CMD runs.
+	if len(sc.Command) != 0 {
+		t.Errorf("sidecar command = %v, want empty (use image CMD)", sc.Command)
+	}
+	// Agent container should have TOOLS_ENABLED when sidecars are present.
+	var toolsEnabled bool
+	for _, env := range cs[0].Env {
+		if env.Name == "TOOLS_ENABLED" && env.Value == "true" {
+			toolsEnabled = true
+		}
+	}
+	if !toolsEnabled {
+		t.Error("agent container should have TOOLS_ENABLED=true when sidecars are present")
 	}
 	// Should NOT have workspace mount
 	for _, m := range sc.VolumeMounts {

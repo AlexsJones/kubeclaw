@@ -521,12 +521,16 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 		})
 	}
 
+	// Enable tools on the agent container when skill sidecars are present.
+	if len(sidecars) > 0 {
+		containers[0].Env = append(containers[0].Env,
+			corev1.EnvVar{Name: "TOOLS_ENABLED", Value: "true"},
+		)
+	}
+
 	// Inject skill sidecar containers.
 	for _, sc := range sidecars {
 		cmd := sc.sidecar.Command
-		if len(cmd) == 0 {
-			cmd = []string{"sleep", "infinity"}
-		}
 
 		var envVars []corev1.EnvVar
 		for _, e := range sc.sidecar.Env {
@@ -552,11 +556,10 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 			}
 		}
 
-		containers = append(containers, corev1.Container{
+		container := corev1.Container{
 			Name:            fmt.Sprintf("skill-%s", sc.skillPackName),
 			Image:           sc.sidecar.Image,
 			ImagePullPolicy: corev1.PullIfNotPresent,
-			Command:         cmd,
 			Env:             envVars,
 			VolumeMounts:    mounts,
 			Resources: corev1.ResourceRequirements{
@@ -569,7 +572,13 @@ func (r *AgentRunReconciler) buildContainers(agentRun *kubeclawv1alpha1.AgentRun
 					corev1.ResourceMemory: resource.MustParse(memReq),
 				},
 			},
-		})
+		}
+		// Only set Command if the SkillPack specifies one; otherwise
+		// let the container image's default CMD (tool-executor) run.
+		if len(cmd) > 0 {
+			container.Command = cmd
+		}
+		containers = append(containers, container)
 	}
 
 	return containers
