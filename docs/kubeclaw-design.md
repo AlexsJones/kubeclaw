@@ -709,6 +709,29 @@ Channel pods:
 This decomposition means channels scale and fail independently. A WhatsApp
 reconnection doesn't affect Telegram. A Telegram rate limit doesn't block Discord.
 
+#### Telegram Setup
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather).
+2. Send `/newbot`, choose a name and username — BotFather replies with an API token.
+3. Create a Kubernetes secret with the token:
+   ```bash
+   kubectl create secret generic my-telegram-creds \
+     --from-literal=TELEGRAM_BOT_TOKEN=<token-from-botfather>
+   ```
+4. Reference the secret in your ClawInstance:
+   ```yaml
+   channels:
+     - type: telegram
+       configRef:
+         secret: my-telegram-creds
+   ```
+5. The controller creates a `channel-telegram` Deployment that long-polls the Telegram Bot API.
+   Messages sent to your bot are routed to AgentRuns automatically.
+
+> **Tip:** To find your `chat_id`, send a message to the bot, then visit
+> `https://api.telegram.org/bot<TOKEN>/getUpdates` — the `chat.id` field
+> in the response is what agents use with `send_channel_message`.
+
 ### 4.5 Event Bus
 
 NATS JetStream (or Redis Streams) serves as the nervous system connecting all
