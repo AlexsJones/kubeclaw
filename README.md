@@ -25,12 +25,6 @@
 ---
 ### Quick Install (macOS / Linux)
 
-**Homebrew:**
-```bash
-brew tap AlexsJones/kubeclaw
-brew install kubeclaw
-```
-
 **Shell installer:**
 ```bash
 curl -fsSL https://deploy.k8sclaw.ai/install.sh | sh
