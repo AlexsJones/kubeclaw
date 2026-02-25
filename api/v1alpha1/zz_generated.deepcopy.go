@@ -119,6 +119,11 @@ func (in *AgentRunStatus) DeepCopyInto(out *AgentRunStatus) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.TokenUsage != nil {
+		in, out := &in.TokenUsage, &out.TokenUsage
+		*out = new(TokenUsage)
+		**out = **in
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))
@@ -146,6 +151,19 @@ func (in *ParentRunRef) DeepCopy() *ParentRunRef {
 		return nil
 	}
 	out := new(ParentRunRef)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *TokenUsage) DeepCopyInto(out *TokenUsage) {
+	*out = *in
+}
+
+func (in *TokenUsage) DeepCopy() *TokenUsage {
+	if in == nil {
+		return nil
+	}
+	out := new(TokenUsage)
 	in.DeepCopyInto(out)
 	return out
 }

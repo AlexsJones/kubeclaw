@@ -205,12 +205,16 @@ func newRunsCmd() *cobra.Command {
 					return err
 				}
 				w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(w, "NAME\tINSTANCE\tPHASE\tPOD\tAGE")
+				fmt.Fprintln(w, "NAME\tINSTANCE\tPHASE\tPOD\tTOKENS\tAGE")
 				for _, run := range list.Items {
 					age := time.Since(run.CreationTimestamp.Time).Round(time.Second)
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					tokens := "-"
+					if run.Status.TokenUsage != nil {
+						tokens = fmt.Sprintf("%d/%d", run.Status.TokenUsage.InputTokens, run.Status.TokenUsage.OutputTokens)
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 						run.Name, run.Spec.InstanceRef,
-						run.Status.Phase, run.Status.PodName, age)
+						run.Status.Phase, run.Status.PodName, tokens, age)
 				}
 				return w.Flush()
 			},
@@ -1266,6 +1270,15 @@ const (
 
 var viewNames = []string{"Instances", "Runs", "Policies", "Skills", "Channels", "Pods", "Schedules"}
 
+// detailPaneState controls the visibility of the right-hand detail pane.
+type detailPaneState int
+
+const (
+	paneCollapsed  detailPaneState = iota // hidden (default)
+	panePanel                             // side panel (~35%)
+	paneFullscreen                        // takes over the whole screen
+)
+
 // ── Styles ───────────────────────────────────────────────────────────────────
 
 var (
@@ -1815,10 +1828,9 @@ type tuiModel struct {
 	editTaskTI       textinput.Model // text input for task sub-modal
 	editSkills       []editSkillItem // toggleable skills list
 
-	// Feed
-	feedExpanded     bool // fullscreen feed mode
-	feedCollapsed    bool // hide feed side pane
-	feedInputFocused bool // typing in the feed chat
+	// Detail pane
+	detailPane       detailPaneState // collapsed, panel, or fullscreen
+	feedInputFocused bool            // typing in the feed chat
 	feedInput        textinput.Model
 	feedScrollOffset int // 0 = pinned to bottom; >0 = scrolled up N lines
 }
@@ -2339,7 +2351,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if m.feedExpanded {
+		if m.detailPane == paneFullscreen {
 			// Chat input mode inside feed
 			if m.feedInputFocused {
 				switch msg.Type {
@@ -2377,13 +2389,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Not typing — global feed keys
 			switch msg.String() {
 			case "esc", "q":
-				m.feedExpanded = false
+				m.detailPane = panePanel
 				m.feedInputFocused = false
 				m.feedInput.Blur()
 				m.feedInput.SetValue("")
 				return m, nil
-			case "f":
-				m.feedExpanded = false
+			case "F":
+				m.detailPane = panePanel
 				m.feedInputFocused = false
 				m.feedInput.Blur()
 				m.feedInput.SetValue("")
@@ -2703,17 +2715,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m, refreshDataCmd()
 		case "f":
-			if len(m.instances) > 0 {
-				m.feedExpanded = !m.feedExpanded
-				if m.feedExpanded {
-					m.feedCollapsed = false
-				}
+			// Toggle detail pane: collapsed ↔ panel
+			if m.detailPane == paneCollapsed {
+				m.detailPane = panePanel
+			} else if m.detailPane == panePanel {
+				m.detailPane = paneCollapsed
+			} else {
+				// From fullscreen, go to panel
+				m.detailPane = panePanel
 			}
 			return m, nil
 		case "F":
-			m.feedCollapsed = !m.feedCollapsed
-			if m.feedCollapsed {
-				m.feedExpanded = false
+			// Toggle fullscreen detail pane
+			if m.detailPane == paneFullscreen {
+				m.detailPane = panePanel
+			} else {
+				m.detailPane = paneFullscreen
 			}
 			return m, nil
 		}
@@ -3940,15 +3957,16 @@ func (m tuiModel) View() string {
 		return view.String()
 	}
 
-	// Split pane: show a conversational feed on the right when instances exist
-	// and the terminal is wide enough.
-	showFeed := len(m.instances) > 0 && m.width >= 100 && !m.feedCollapsed
+	// Split pane: show a detail pane on the right when the pane is open,
+	// the terminal is wide enough, and the active view supports it.
+	// Channels tab hides the detail pane.
+	showDetailPane := m.detailPane == panePanel && m.width >= 100 && m.activeView != viewChannels
 	fullWidth := m.width
-	if showFeed {
-		// Left pane gets 65%, feed gets 35% (minus 1 for separator).
+	if showDetailPane {
+		// Left pane gets 65%, detail pane gets 35% (minus 1 for separator).
 		leftW := fullWidth * 65 / 100
 		if leftW > fullWidth-25 {
-			leftW = fullWidth - 25 // ensure feed gets at least 25 cols
+			leftW = fullWidth - 25 // ensure detail pane gets at least 25 cols
 		}
 		m.width = leftW
 	}
@@ -4025,18 +4043,18 @@ func (m tuiModel) View() string {
 
 	base := view.String()
 
-	if showFeed {
+	if showDetailPane {
 		rightW := fullWidth - m.width - 1 // 1 for vertical separator
-		// Derive feed height from the actual left-pane line count so the
+		// Derive pane height from the actual left-pane line count so the
 		// right pane never exceeds it (which would push the header off-screen).
-		feedH := strings.Count(base, "\n")
-		feedStr := m.renderFeed(rightW, feedH)
-		base = joinPanesHorizontally(base, feedStr, m.width, rightW)
+		paneH := strings.Count(base, "\n")
+		paneStr := m.renderDetailPane(rightW, paneH)
+		base = joinPanesHorizontally(base, paneStr, m.width, rightW)
 		m.width = fullWidth // restore for overlay centering
 	}
 
-	if m.feedExpanded {
-		return m.renderFeedFullscreen()
+	if m.detailPane == paneFullscreen {
+		return m.renderDetailPaneFullscreen()
 	}
 	if m.confirmDelete {
 		return m.renderDeleteConfirm(base)
@@ -4129,13 +4147,21 @@ func (m tuiModel) renderTable(tableH int) string {
 func (m tuiModel) renderInstancesTable(tableH int) string {
 	var b strings.Builder
 
-	header := fmt.Sprintf(" %-22s %-12s %-20s %-20s %-8s %-8s", "NAME", "PHASE", "CHANNELS", "SKILLS", "PODS", "AGE")
+	header := fmt.Sprintf(" %-22s %-12s %-20s %-8s %-12s %-8s", "NAME", "PHASE", "SKILLS", "PODS", "TOKENS", "AGE")
 	b.WriteString(tuiColHeaderStyle.Render(padRight(header, m.width)))
 	b.WriteString("\n")
 
 	if len(m.instances) == 0 {
 		b.WriteString(m.renderEmptyTable(tableH-1, "No instances — press O to onboard or type /onboard"))
 		return b.String()
+	}
+
+	// Pre-compute total token usage per instance from completed runs.
+	instanceTokens := make(map[string]int)
+	for _, run := range m.runs {
+		if run.Status.TokenUsage != nil {
+			instanceTokens[run.Spec.InstanceRef] += run.Status.TokenUsage.TotalTokens
+		}
 	}
 
 	for i := 0; i < tableH-1; i++ {
@@ -4146,15 +4172,6 @@ func (m tuiModel) renderInstancesTable(tableH int) string {
 		}
 		inst := m.instances[idx]
 		age := shortDuration(time.Since(inst.CreationTimestamp.Time))
-
-		channels := make([]string, 0)
-		for _, ch := range inst.Status.Channels {
-			channels = append(channels, ch.Type)
-		}
-		chStr := strings.Join(channels, ",")
-		if chStr == "" {
-			chStr = "-"
-		}
 
 		// Build skills column from SkillRef list.
 		skillNames := make([]string, 0, len(inst.Spec.Skills))
@@ -4170,13 +4187,31 @@ func (m tuiModel) renderInstancesTable(tableH int) string {
 			skillStr = "-"
 		}
 
-		row := fmt.Sprintf(" %-22s %-12s %-20s %-20s %-8d %-8s",
-			truncate(inst.Name, 22), inst.Status.Phase, truncate(chStr, 20), truncate(skillStr, 20), inst.Status.ActiveAgentPods, age)
+		tokStr := "-"
+		if total, ok := instanceTokens[inst.Name]; ok && total > 0 {
+			tokStr = formatTokenCount(total)
+		}
+
+		row := fmt.Sprintf(" %-22s %-12s %-20s %-8d %-12s %-8s",
+			truncate(inst.Name, 22), inst.Status.Phase, truncate(skillStr, 20), inst.Status.ActiveAgentPods, tokStr, age)
 
 		b.WriteString(m.styleRow(idx, row))
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// formatTokenCount formats a token count into a human-readable string
+// (e.g. 1234 → "1.2k", 56789 → "56.8k", 1234567 → "1.2M").
+func formatTokenCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 func (m tuiModel) renderRunsTable(tableH int) string {
@@ -4594,7 +4629,281 @@ func (m tuiModel) renderLog(logH int) string {
 	return b.String()
 }
 
-func (m tuiModel) renderFeed(width, height int) string {
+// renderDetailPane dispatches to the correct detail pane content based on the
+// active tab. Channels tab never shows a detail pane (handled by caller).
+func (m tuiModel) renderDetailPane(width, height int) string {
+	switch m.activeView {
+	case viewInstances:
+		return m.renderDetailInstanceChannels(width, height)
+	case viewRuns:
+		return m.renderDetailFeed(width, height)
+	case viewSkills:
+		return m.renderDetailSkillRuns(width, height)
+	case viewPods:
+		return m.renderDetailPodLogs(width, height)
+	default:
+		return m.renderDetailFeed(width, height)
+	}
+}
+
+// renderDetailInstanceChannels shows channels bound to the selected instance.
+func (m tuiModel) renderDetailInstanceChannels(width, height int) string {
+	var allLines []string
+
+	inst := m.selectedInstanceForFeed()
+	titleLabel := "─── Channels "
+	if inst != "" {
+		titleLabel = fmt.Sprintf("─── Channels: %s ", inst)
+	}
+	title := " " + tuiFeedTitleStyle.Render(titleLabel)
+	titleW := lipgloss.Width(title)
+	if width > titleW {
+		title += tuiSepStyle.Render(strings.Repeat("─", width-titleW))
+	}
+	allLines = append(allLines, title)
+
+	if inst == "" {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  Select an instance"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	// Find channels for this instance.
+	var instChannels []channelRow
+	for _, ch := range m.channels {
+		if ch.InstanceName == inst {
+			instChannels = append(instChannels, ch)
+		}
+	}
+
+	if len(instChannels) == 0 {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  No channels"))
+		allLines = append(allLines, tuiDimStyle.Render("  /channel "+inst+" telegram <secret>"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	contentW := width - 4
+	if contentW < 10 {
+		contentW = 10
+	}
+
+	for _, ch := range instChannels {
+		statusIcon := "●"
+		statusStyle := tuiDimStyle
+		switch ch.Status {
+		case "Connected":
+			statusStyle = tuiSuccessStyle
+		case "Error", "Disconnected":
+			statusStyle = tuiErrorStyle
+		}
+		line := statusStyle.Render(" "+statusIcon+" ") + lipgloss.NewStyle().Foreground(lipgloss.Color("#CDD6F4")).Render(ch.Type)
+		allLines = append(allLines, line)
+
+		secretLine := tuiDimStyle.Render("   secret: " + truncate(ch.SecretRef, contentW-10))
+		allLines = append(allLines, secretLine)
+
+		statusLine := tuiDimStyle.Render("   status: ") + statusStyle.Render(ch.Status)
+		allLines = append(allLines, statusLine)
+
+		if ch.Message != "" {
+			for _, wl := range wrapText(ch.Message, contentW) {
+				allLines = append(allLines, tuiDimStyle.Render("   "+wl))
+			}
+		}
+		allLines = append(allLines, "")
+	}
+
+	for len(allLines) < height {
+		allLines = append(allLines, "")
+	}
+	if len(allLines) > height {
+		allLines = allLines[:height]
+	}
+	return padAndJoinLines(allLines, width)
+}
+
+// renderDetailSkillRuns shows which runs have used the selected skill.
+func (m tuiModel) renderDetailSkillRuns(width, height int) string {
+	var allLines []string
+
+	var skillName string
+	if m.selectedRow < len(m.skills) {
+		skillName = m.skills[m.selectedRow].Name
+	}
+
+	titleLabel := "─── Skill Runs "
+	if skillName != "" {
+		titleLabel = fmt.Sprintf("─── Runs using: %s ", skillName)
+	}
+	title := " " + tuiFeedTitleStyle.Render(titleLabel)
+	titleW := lipgloss.Width(title)
+	if width > titleW {
+		title += tuiSepStyle.Render(strings.Repeat("─", width-titleW))
+	}
+	allLines = append(allLines, title)
+
+	if skillName == "" {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  Select a skill"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	// Find instances that use this skill, then find their runs.
+	usingInstances := make(map[string]bool)
+	for _, inst := range m.instances {
+		for _, sk := range inst.Spec.Skills {
+			if sk.SkillPackRef == skillName || sk.ConfigMapRef == skillName {
+				usingInstances[inst.Name] = true
+			}
+		}
+	}
+
+	var matchedRuns []kubeclawv1alpha1.AgentRun
+	for _, run := range m.runs {
+		if usingInstances[run.Spec.InstanceRef] {
+			matchedRuns = append(matchedRuns, run)
+		}
+	}
+
+	if len(matchedRuns) == 0 {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  No runs for this skill"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	contentW := width - 4
+	if contentW < 10 {
+		contentW = 10
+	}
+
+	for _, run := range matchedRuns {
+		age := shortDuration(time.Since(run.CreationTimestamp.Time))
+		phase := string(run.Status.Phase)
+		if phase == "" {
+			phase = "Pending"
+		}
+		phaseStyle := tuiDimStyle
+		switch phase {
+		case "Succeeded", "Completed":
+			phaseStyle = tuiSuccessStyle
+		case "Running":
+			phaseStyle = tuiRunningStyle
+		case "Failed", "Timeout":
+			phaseStyle = tuiErrorStyle
+		}
+		nameLine := " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#CDD6F4")).Render(truncate(run.Name, contentW))
+		allLines = append(allLines, nameLine)
+		metaLine := tuiDimStyle.Render("   "+run.Spec.InstanceRef+" • ") + phaseStyle.Render(phase) + tuiDimStyle.Render(" • "+age)
+		allLines = append(allLines, metaLine)
+
+		task := extractUserMessage(run.Spec.Task)
+		if len(task) > contentW {
+			task = task[:contentW-3] + "..."
+		}
+		allLines = append(allLines, tuiDimStyle.Render("   "+task))
+		allLines = append(allLines, "")
+	}
+
+	for len(allLines) < height {
+		allLines = append(allLines, "")
+	}
+	if len(allLines) > height {
+		allLines = allLines[:height]
+	}
+	return padAndJoinLines(allLines, width)
+}
+
+// renderDetailPodLogs shows logs for the selected pod.
+func (m tuiModel) renderDetailPodLogs(width, height int) string {
+	var allLines []string
+
+	filtered := m.filteredPods()
+	var podName string
+	if m.selectedRow < len(filtered) {
+		podName = filtered[m.selectedRow].Name
+	}
+
+	titleLabel := "─── Pod Logs "
+	if podName != "" {
+		titleLabel = fmt.Sprintf("─── Logs: %s ", truncate(podName, width-16))
+	}
+	title := " " + tuiFeedTitleStyle.Render(titleLabel)
+	titleW := lipgloss.Width(title)
+	if width > titleW {
+		title += tuiSepStyle.Render(strings.Repeat("─", width-titleW))
+	}
+	allLines = append(allLines, title)
+
+	if podName == "" {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  Select a pod"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	// Filter log lines for this pod.
+	podPrefix := podName
+	var podLogs []string
+	for _, line := range m.logLines {
+		if strings.Contains(line, podPrefix) {
+			podLogs = append(podLogs, line)
+		}
+	}
+
+	if len(podLogs) == 0 {
+		allLines = append(allLines, "")
+		allLines = append(allLines, tuiDimStyle.Render("  No log entries for this pod"))
+		allLines = append(allLines, tuiDimStyle.Render("  Press l to fetch logs"))
+		for len(allLines) < height {
+			allLines = append(allLines, "")
+		}
+		return padAndJoinLines(allLines, width)
+	}
+
+	contentW := width - 2
+	if contentW < 10 {
+		contentW = 10
+	}
+
+	// Show tail of pod logs.
+	start := len(podLogs) - (height - 1)
+	if start < 0 {
+		start = 0
+	}
+	for _, line := range podLogs[start:] {
+		if lipgloss.Width(line) > contentW {
+			line = ansiTruncate(line, contentW)
+		}
+		allLines = append(allLines, " "+line)
+	}
+
+	for len(allLines) < height {
+		allLines = append(allLines, "")
+	}
+	if len(allLines) > height {
+		allLines = allLines[:height]
+	}
+	return padAndJoinLines(allLines, width)
+}
+
+// renderDetailFeed shows the conversation feed for the selected instance (used
+// by Instances and Runs tabs).
+func (m tuiModel) renderDetailFeed(width, height int) string {
 	var allLines []string
 
 	inst := m.selectedInstanceForFeed()
@@ -4615,7 +4924,7 @@ func (m tuiModel) renderFeed(width, height int) string {
 	if len(runs) == 0 {
 		allLines = append(allLines, "")
 		allLines = append(allLines, tuiDimStyle.Render("  No runs yet"))
-		allLines = append(allLines, tuiDimStyle.Render("  Press f to chat"))
+		allLines = append(allLines, tuiDimStyle.Render("  Press Shift+F to chat"))
 		for len(allLines) < height {
 			allLines = append(allLines, "")
 		}
@@ -4651,7 +4960,7 @@ func (m tuiModel) renderFeed(width, height int) string {
 				shown := 0
 				for _, rl := range resultLines {
 					if shown >= 3 {
-						allLines = append(allLines, tuiDimStyle.Render("   ┊ f to expand"))
+						allLines = append(allLines, tuiDimStyle.Render("   ┊ Shift+F to expand"))
 						break
 					}
 					rl = strings.TrimRight(rl, " \t\r")
@@ -4662,6 +4971,11 @@ func (m tuiModel) renderFeed(width, height int) string {
 				}
 			} else {
 				allLines = append(allLines, tuiSuccessStyle.Render("   ✓ Completed"))
+			}
+			if run.Status.TokenUsage != nil {
+				u := run.Status.TokenUsage
+				allLines = append(allLines, tuiDimStyle.Render(fmt.Sprintf("   ⟠ %d in / %d out │ %d tools │ %dms",
+					u.InputTokens, u.OutputTokens, u.ToolCalls, u.DurationMs)))
 			}
 		case "Running":
 			allLines = append(allLines, tuiRunningStyle.Render("   ⏳ Running..."))
@@ -4712,10 +5026,23 @@ func (m tuiModel) renderFeed(width, height int) string {
 	return padAndJoinLines(result, width)
 }
 
-func (m tuiModel) renderFeedFullscreen() string {
+func (m tuiModel) renderDetailPaneFullscreen() string {
 	w := m.width
 	h := m.height
 
+	// For non-chat tabs, render the tab-specific detail pane at full size.
+	switch m.activeView {
+	case viewSkills:
+		return m.renderFullscreenDetailStatic(w, h, m.renderDetailSkillRuns)
+	case viewPods:
+		return m.renderFullscreenDetailStatic(w, h, m.renderDetailPodLogs)
+	case viewChannels:
+		// Channels tab: nothing to show fullscreen, fall back to chat
+	case viewInstances:
+		return m.renderFullscreenDetailStatic(w, h, m.renderDetailInstanceChannels)
+	}
+
+	// Runs tab and fallback: show the chat fullscreen with input.
 	inst := m.selectedInstanceForFeed()
 
 	var allLines []string
@@ -4842,7 +5169,7 @@ func (m tuiModel) renderFeedFullscreen() string {
 	if m.feedInputFocused {
 		statusKeys = []string{"Esc", "cancel", "Enter", "send"}
 	} else {
-		statusKeys = []string{"i/Enter", "type", "Esc/f", "close", "q", "quit"}
+		statusKeys = []string{"i/Enter", "type", "Esc/F", "close", "q", "quit"}
 	}
 	var sb strings.Builder
 	for i := 0; i < len(statusKeys)-1; i += 2 {
@@ -4861,6 +5188,37 @@ func (m tuiModel) renderFeedFullscreen() string {
 	out = append(out, lipgloss.NewStyle().Background(lipgloss.Color("#181825")).Render(left+pad))
 
 	return strings.Join(out, "\n")
+}
+
+// renderFullscreenDetailStatic renders a tab-specific detail pane at full
+// screen size with a status bar at the bottom.
+func (m tuiModel) renderFullscreenDetailStatic(w, h int, renderer func(int, int) string) string {
+	// Reserve 1 line for status bar.
+	contentH := h - 1
+	if contentH < 3 {
+		contentH = 3
+	}
+	content := renderer(w, contentH)
+
+	// Status bar.
+	statusKeys := []string{"Esc/F", "close", "f", "panel", "q", "quit"}
+	var sb strings.Builder
+	for i := 0; i < len(statusKeys)-1; i += 2 {
+		entry := tuiStatusKeyStyle.Render(" "+statusKeys[i]+" ") + tuiStatusBarStyle.Render(statusKeys[i+1]+" ")
+		if lipgloss.Width(sb.String()+entry) > w {
+			break
+		}
+		sb.WriteString(entry)
+	}
+	left := sb.String()
+	lw := lipgloss.Width(left)
+	pad := ""
+	if w > lw {
+		pad = strings.Repeat(" ", w-lw)
+	}
+	bar := lipgloss.NewStyle().Background(lipgloss.Color("#181825")).Render(left + pad)
+
+	return content + "\n" + bar
 }
 
 func padAndJoinLines(lines []string, width int) string {
@@ -4920,8 +5278,8 @@ func (m tuiModel) renderStatusBar() string {
 			"1-7", "views",
 			"Enter", "detail",
 			"Esc", "back",
-			"f", "feed",
-			"F", "feed toggle",
+			"f", "detail pane",
+			"F", "fullscreen",
 			"l", "logs",
 			"d", "describe",
 			"R", "run",
@@ -5290,6 +5648,11 @@ func tuiRunStatus(ns, name string) (string, error) {
 			b.WriteString("\n" + tuiSuccessStyle.Render("  ↳ "+line))
 			shown++
 		}
+	}
+	if run.Status.TokenUsage != nil {
+		u := run.Status.TokenUsage
+		b.WriteString("\n" + tuiDimStyle.Render(fmt.Sprintf("  ⟠ tokens: %d in / %d out (%d total) │ tools: %d │ %dms",
+			u.InputTokens, u.OutputTokens, u.TotalTokens, u.ToolCalls, u.DurationMs)))
 	}
 	if run.Status.Error != "" {
 		b.WriteString("\n" + tuiErrorStyle.Render("  ✗ "+run.Status.Error))

@@ -196,9 +196,31 @@ type AgentRunStatus struct {
 	// +optional
 	ExitCode *int32 `json:"exitCode,omitempty"`
 
+	// TokenUsage contains LLM token counts and timing for this run.
+	// +optional
+	TokenUsage *TokenUsage `json:"tokenUsage,omitempty"`
+
 	// Conditions represent the latest available observations.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// TokenUsage tracks LLM token consumption and timing for an AgentRun.
+type TokenUsage struct {
+	// InputTokens is the total number of prompt/input tokens sent to the LLM.
+	InputTokens int `json:"inputTokens"`
+
+	// OutputTokens is the total number of completion/output tokens received.
+	OutputTokens int `json:"outputTokens"`
+
+	// TotalTokens is InputTokens + OutputTokens.
+	TotalTokens int `json:"totalTokens"`
+
+	// ToolCalls is the number of tool invocations during this run.
+	ToolCalls int `json:"toolCalls"`
+
+	// DurationMs is the wall-clock time of the LLM interaction in milliseconds.
+	DurationMs int64 `json:"durationMs"`
 }
 
 // +kubebuilder:object:root=true

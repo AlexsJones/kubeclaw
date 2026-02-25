@@ -217,10 +217,10 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 	// Check Job completion
 	if job.Status.Succeeded > 0 {
 		// Extract the LLM response from pod logs before the pod is gone.
-		result := r.extractResultFromPod(ctx, log, agentRun)
+		result, usage := r.extractResultFromPod(ctx, log, agentRun)
 		// Extract and persist memory updates if applicable.
 		r.extractAndPersistMemory(ctx, log, agentRun)
-		return r.succeedRun(ctx, agentRun, result)
+		return r.succeedRun(ctx, agentRun, result, usage)
 	}
 	if job.Status.Failed > 0 {
 		return ctrl.Result{}, r.failRun(ctx, agentRun, "Job failed")
@@ -237,11 +237,11 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 		if done, exitCode, reason, hasSidecars := r.checkAgentContainer(ctx, log, agentRun); done && hasSidecars {
 			if exitCode == 0 {
 				log.Info("Agent container terminated successfully; cleaning up lingering sidecars")
-				result := r.extractResultFromPod(ctx, log, agentRun)
+				result, usage := r.extractResultFromPod(ctx, log, agentRun)
 				r.extractAndPersistMemory(ctx, log, agentRun)
 				// Delete the Job so Kubernetes kills remaining sidecar containers.
 				_ = r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
-				return r.succeedRun(ctx, agentRun, result)
+				return r.succeedRun(ctx, agentRun, result, usage)
 			}
 			errMsg := fmt.Sprintf("agent container exited with code %d", exitCode)
 			if reason != "" {
@@ -249,7 +249,7 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 			}
 			log.Info("Agent container terminated with error; cleaning up", "exitCode", exitCode, "reason", reason)
 			// Try to extract the error from pod logs before cleaning up.
-			if logErr := r.extractResultFromPod(ctx, log, agentRun); logErr != "" {
+			if logErr, _ := r.extractResultFromPod(ctx, log, agentRun); logErr != "" {
 				errMsg = logErr
 			}
 			_ = r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
@@ -888,11 +888,12 @@ func (r *AgentRunReconciler) createInputConfigMap(ctx context.Context, agentRun 
 }
 
 // succeedRun marks an AgentRun as succeeded and stores the result.
-func (r *AgentRunReconciler) succeedRun(ctx context.Context, agentRun *kubeclawv1alpha1.AgentRun, result string) (ctrl.Result, error) {
+func (r *AgentRunReconciler) succeedRun(ctx context.Context, agentRun *kubeclawv1alpha1.AgentRun, result string, usage *kubeclawv1alpha1.TokenUsage) (ctrl.Result, error) {
 	now := metav1.Now()
 	agentRun.Status.Phase = kubeclawv1alpha1.AgentRunPhaseSucceeded
 	agentRun.Status.CompletedAt = &now
 	agentRun.Status.Result = result
+	agentRun.Status.TokenUsage = usage
 	return ctrl.Result{}, r.Status().Update(ctx, agentRun)
 }
 
@@ -903,9 +904,9 @@ const (
 
 // extractResultFromPod reads the agent container logs and looks for the
 // structured result marker written by agent-runner.
-func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) string {
+func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.Logger, agentRun *kubeclawv1alpha1.AgentRun) (string, *kubeclawv1alpha1.TokenUsage) {
 	if r.Clientset == nil || agentRun.Status.PodName == "" {
-		return ""
+		return "", nil
 	}
 
 	tailLines := int64(20)
@@ -917,41 +918,65 @@ func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		log.V(1).Info("could not read pod logs for result", "err", err)
-		return ""
+		return "", nil
 	}
 	defer stream.Close()
 
 	raw, err := io.ReadAll(stream)
 	if err != nil {
 		log.V(1).Info("error reading pod logs", "err", err)
-		return ""
+		return "", nil
 	}
 
 	logs := string(raw)
 	startIdx := strings.LastIndex(logs, resultMarkerStart)
 	if startIdx < 0 {
-		return ""
+		return "", nil
 	}
 	payload := logs[startIdx+len(resultMarkerStart):]
 	endIdx := strings.Index(payload, resultMarkerEnd)
 	if endIdx < 0 {
-		return ""
+		return "", nil
 	}
 	jsonStr := strings.TrimSpace(payload[:endIdx])
 
-	// Parse and return just the response text.
+	// Parse the full agent result including metrics.
 	var parsed struct {
 		Status   string `json:"status"`
 		Response string `json:"response"`
+		Metrics  struct {
+			DurationMs   int64 `json:"durationMs"`
+			InputTokens  int   `json:"inputTokens"`
+			OutputTokens int   `json:"outputTokens"`
+			ToolCalls    int   `json:"toolCalls"`
+		} `json:"metrics"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
 		log.V(1).Info("could not parse result JSON", "err", err)
-		return jsonStr // Return raw JSON as fallback.
+		return jsonStr, nil // Return raw JSON as fallback.
 	}
 	if parsed.Status == "error" {
-		return ""
+		return "", nil
 	}
-	return parsed.Response
+
+	var usage *kubeclawv1alpha1.TokenUsage
+	if parsed.Metrics.InputTokens > 0 || parsed.Metrics.OutputTokens > 0 {
+		usage = &kubeclawv1alpha1.TokenUsage{
+			InputTokens:  parsed.Metrics.InputTokens,
+			OutputTokens: parsed.Metrics.OutputTokens,
+			TotalTokens:  parsed.Metrics.InputTokens + parsed.Metrics.OutputTokens,
+			ToolCalls:    parsed.Metrics.ToolCalls,
+			DurationMs:   parsed.Metrics.DurationMs,
+		}
+		log.Info("extracted token usage",
+			"inputTokens", usage.InputTokens,
+			"outputTokens", usage.OutputTokens,
+			"totalTokens", usage.TotalTokens,
+			"toolCalls", usage.ToolCalls,
+			"durationMs", usage.DurationMs)
+	}
+
+	return parsed.Response, usage
 }
 
 const (
