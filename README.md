@@ -221,7 +221,7 @@ Channels connect KubeClaw to external messaging platforms. Each channel runs as 
 | Channel | Protocol | Self-chat | Status |
 |---------|----------|-----------|--------|
 | **WhatsApp** | WhatsApp Web (multidevice) via `whatsmeow` | ✅ Owner can message themselves to interact with agents | **Stable** |
-| **Telegram** | Bot API (`tgbotapi`) | — | **Alpha** |
+| **Telegram** | Bot API (`tgbotapi`) | ✅ Owner can message themselves to interact with agents | **Stable** |
 | **Discord** | Gateway WebSocket (`discordgo`) | — | **Alpha** |
 | **Slack** | Socket Mode (`slack-go`) | — | **Alpha** |
 
