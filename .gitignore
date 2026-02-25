@@ -5,7 +5,7 @@ bin/
 /controller
 /ipc-bridge
 /webhook
-/kubeclaw
+/sympozium
 *.exe
 *.dll
 *.so
