@@ -1,23 +1,50 @@
 #!/bin/sh
 # kubeclaw installer
-# Usage: curl -fsSL https://deploy.kubeclaw.ai/install.sh | sh
+# Usage: curl -fsSL https://deploy.k8sclaw.ai/install.sh | sh
+#        curl -fsSL https://deploy.k8sclaw.ai/install.sh | sh -s -- --local   # Install to ~/.local/bin (no sudo)
 #
 # Downloads the latest kubeclaw CLI release from GitHub and installs
-# the binary to /usr/local/bin (or ~/.local/bin if no sudo).
+# the binary to /usr/local/bin (or ~/.local/bin with --local or if no sudo).
 
 set -e
 
 REPO="AlexsJones/kubeclaw"
 BINARY="kubeclaw"
+LOCAL_INSTALL=""
 
 # --- helpers ---
 
 info() { printf '  \033[1;34m>\033[0m %s\n' "$*"; }
+warn() { printf '  \033[1;33m>\033[0m %s\n' "$*"; }
 err()  { printf '  \033[1;31m!\033[0m %s\n' "$*" >&2; exit 1; }
 
 need() {
     command -v "$1" >/dev/null 2>&1 \
         || err "Required tool '$1' not found. Please install it and try again."
+}
+
+# --- parse arguments ---
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --local|-l)
+                LOCAL_INSTALL="1"
+                ;;
+            --help|-h)
+                echo "Usage: install.sh [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --local, -l    Install to ~/.local/bin (no sudo required)"
+                echo "  --help, -h     Show this help message"
+                exit 0
+                ;;
+            *)
+                warn "Unknown option: $1"
+                ;;
+        esac
+        shift
+    done
 }
 
 # --- detect platform ---
@@ -45,6 +72,7 @@ detect_platform() {
 
 fetch_latest_tag() {
     need curl
+    need tar
 
     # Use the releases redirect instead of the API to avoid
     # GitHub's 60-request/hour rate limit on unauthenticated API calls.
@@ -74,23 +102,35 @@ install() {
     tar -xzf "${TMPDIR}/${ASSET}" -C "$TMPDIR"
 
     BIN="$(find "$TMPDIR" -name "$BINARY" -type f | head -1)"
-    [ -n "$BIN" ] || err "Binary not found in archive."
+    [ -n "$BIN" ] || err "Binary not found in archive. Release asset may have an unexpected layout."
 
     chmod +x "$BIN"
 
-    # Install to /usr/local/bin or fall back to ~/.local/bin
-    if [ -w /usr/local/bin ]; then
-        INSTALL_DIR="/usr/local/bin"
-    elif command -v sudo >/dev/null 2>&1; then
-        info "Installing to /usr/local/bin (requires sudo)..."
-        INSTALL_DIR="/usr/local/bin"
-        sudo sh -c "mv '$BIN' '${INSTALL_DIR}/${BINARY}' && chmod 755 '${INSTALL_DIR}/${BINARY}'" </dev/tty \
-            || err "sudo install failed. Try running the script directly (not piped from curl)."
-        info "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
-        return
-    else
+    # Determine install directory
+    if [ -n "$LOCAL_INSTALL" ]; then
+        # User explicitly requested local install
         INSTALL_DIR="${HOME}/.local/bin"
         mkdir -p "$INSTALL_DIR"
+        info "Installing to ${INSTALL_DIR} (--local mode)..."
+    elif [ -w /usr/local/bin ]; then
+        # /usr/local/bin is writable without sudo
+        INSTALL_DIR="/usr/local/bin"
+    elif command -v sudo >/dev/null 2>&1 && [ -t 0 ]; then
+        # sudo is available and we're in an interactive terminal
+        info "Installing to /usr/local/bin (requires sudo)..."
+        if sudo mv "$BIN" "/usr/local/bin/${BINARY}"; then
+            info "Installed ${BINARY} to /usr/local/bin/${BINARY}"
+            return
+        else
+            warn "sudo failed, falling back to ~/.local/bin"
+            INSTALL_DIR="${HOME}/.local/bin"
+            mkdir -p "$INSTALL_DIR"
+        fi
+    else
+        # No write access and no interactive sudo, use local install
+        INSTALL_DIR="${HOME}/.local/bin"
+        mkdir -p "$INSTALL_DIR"
+        info "Installing to ${INSTALL_DIR} (no sudo available)..."
     fi
 
     mv "$BIN" "${INSTALL_DIR}/${BINARY}"
@@ -99,13 +139,19 @@ install() {
     # Check if install dir is in PATH
     case ":$PATH:" in
         *":${INSTALL_DIR}:"*) ;;
-        *) info "Add ${INSTALL_DIR} to your PATH to use '${BINARY}' directly." ;;
+        *)
+            warn "Add ${INSTALL_DIR} to your PATH to use '${BINARY}' directly:"
+            echo ""
+            echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+            echo ""
+            ;;
     esac
 }
 
 # --- main ---
 
 main() {
+    parse_args "$@"
     info "kubeclaw installer"
     detect_platform
     fetch_latest_tag
@@ -113,4 +159,4 @@ main() {
     info "Done! Run 'kubeclaw install' to deploy KubeClaw to your cluster."
 }
 
-main
+main "$@"
