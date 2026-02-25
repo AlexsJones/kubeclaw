@@ -58,8 +58,9 @@ test: ## Run tests
 test-short: ## Run short tests
 	$(GOTEST) -short ./...
 
-test-integration: ## Run integration tests (requires Kind cluster + OPENAI_API_KEY)
+test-integration: ## Run integration tests (requires Kind cluster + API keys)
 	./test/integration/test-write-file.sh
+	./test/integration/test-anthropic-write-file.sh
 	./test/integration/test-k8s-ops-nodes.sh
 	./test/integration/test-telegram-channel.sh
 	./test/integration/test-slack-channel.sh

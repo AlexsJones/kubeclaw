@@ -384,3 +384,248 @@ func TestProviderRouting(t *testing.T) {
 		t.Error("expected Anthropic server to be called for anthropic provider")
 	}
 }
+
+func TestCallAnthropic_ToolUseFlow(t *testing.T) {
+	// Simulate the Anthropic tool-calling loop:
+	//   1. First response: model returns tool_use block → agent executes tool → sends tool_result
+	//   2. Second response: model returns final text
+	callCount := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if callCount == 1 {
+			// First call: model wants to use a tool.
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "msg_tool", "type": "message", "role": "assistant", "model": "claude-sonnet-4-20250514",
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": "I'll read that file for you.",
+					},
+					{
+						"type":  "tool_use",
+						"id":    "toolu_01ABC",
+						"name":  "read_file",
+						"input": map[string]string{"path": "/tmp/testfile.txt"},
+					},
+				},
+				"stop_reason": "tool_use",
+				"usage":       map[string]int{"input_tokens": 20, "output_tokens": 30},
+			})
+			return
+		}
+
+		// Second call: model produces final text after receiving tool result.
+		// Verify the request body includes the tool_result.
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		messages, _ := body["messages"].([]any)
+		if len(messages) < 3 {
+			t.Errorf("expected at least 3 messages (user + assistant + tool_result), got %d", len(messages))
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_final", "type": "message", "role": "assistant", "model": "claude-sonnet-4-20250514",
+			"content": []map[string]any{
+				{"type": "text", "text": "The file contains: hello world"},
+			},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 50, "output_tokens": 15},
+		})
+	})
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	// Create a temp file for the read_file tool to read.
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "testfile.txt")
+	os.WriteFile(tmpFile, []byte("hello world"), 0o644)
+
+	// Define a minimal read_file tool.
+	tools := []ToolDef{
+		{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters: map[string]any{
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "File path"},
+				},
+				"required": []string{"path"},
+			},
+		},
+	}
+
+	ctx := t.Context()
+	text, inTok, outTok, toolCalls, err := callAnthropic(ctx, "key", srv.URL, "claude-sonnet-4-20250514", "sys", "Read /tmp/testfile.txt", tools)
+	if err != nil {
+		t.Fatalf("callAnthropic tool-use error: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls (tool_use + final), got %d", callCount)
+	}
+	if toolCalls != 1 {
+		t.Errorf("expected 1 tool call, got %d", toolCalls)
+	}
+	if text != "The file contains: hello world" {
+		t.Errorf("text = %q, want %q", text, "The file contains: hello world")
+	}
+	if inTok != 70 { // 20 + 50
+		t.Errorf("input tokens = %d, want 70", inTok)
+	}
+	if outTok != 45 { // 30 + 15
+		t.Errorf("output tokens = %d, want 45", outTok)
+	}
+}
+
+func TestCallAnthropic_MultipleToolCalls(t *testing.T) {
+	// Verify handling of multiple tool_use blocks in a single response.
+	callCount := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if callCount == 1 {
+			// Model returns two tool_use blocks at once.
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "msg_multi", "type": "message", "role": "assistant", "model": "claude-sonnet-4-20250514",
+				"content": []map[string]any{
+					{"type": "tool_use", "id": "toolu_01A", "name": "read_file",
+						"input": map[string]string{"path": "/workspace/a.txt"}},
+					{"type": "tool_use", "id": "toolu_01B", "name": "read_file",
+						"input": map[string]string{"path": "/workspace/b.txt"}},
+				},
+				"stop_reason": "tool_use",
+				"usage":       map[string]int{"input_tokens": 10, "output_tokens": 20},
+			})
+			return
+		}
+
+		// Verify both tool_result blocks are present.
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		messages, _ := body["messages"].([]any)
+		lastMsg, _ := messages[len(messages)-1].(map[string]any)
+		content, _ := lastMsg["content"].([]any)
+		resultCount := 0
+		for _, c := range content {
+			block, _ := c.(map[string]any)
+			if block["type"] == "tool_result" {
+				resultCount++
+			}
+		}
+		if resultCount != 2 {
+			t.Errorf("expected 2 tool_result blocks, got %d", resultCount)
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_done", "type": "message", "role": "assistant", "model": "claude-sonnet-4-20250514",
+			"content":     []map[string]any{{"type": "text", "text": "Both files read."}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 30, "output_tokens": 5},
+		})
+	})
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	tools := []ToolDef{
+		{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters: map[string]any{
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "File path"},
+				},
+				"required": []string{"path"},
+			},
+		},
+	}
+
+	ctx := t.Context()
+	text, _, _, toolCalls, err := callAnthropic(ctx, "key", srv.URL, "claude-sonnet-4-20250514", "sys", "Read both", tools)
+	if err != nil {
+		t.Fatalf("callAnthropic multi-tool error: %v", err)
+	}
+	if toolCalls != 2 {
+		t.Errorf("expected 2 tool calls, got %d", toolCalls)
+	}
+	if text != "Both files read." {
+		t.Errorf("text = %q, want %q", text, "Both files read.")
+	}
+}
+
+func TestCallAnthropic_ToolErrorIsError(t *testing.T) {
+	// Verify that tool results starting with "Error:" set is_error=true in
+	// the tool_result block sent back to Anthropic.
+	callCount := 0
+	var capturedBody map[string]any
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if callCount == 1 {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "msg_err", "type": "message", "role": "assistant", "model": "claude-sonnet-4-20250514",
+				"content": []map[string]any{
+					{"type": "tool_use", "id": "toolu_err", "name": "read_file",
+						"input": map[string]string{"path": "/nonexistent/file.txt"}},
+				},
+				"stop_reason": "tool_use",
+				"usage":       map[string]int{"input_tokens": 5, "output_tokens": 10},
+			})
+			return
+		}
+
+		json.NewDecoder(r.Body).Decode(&capturedBody)
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_recovery", "type": "message", "role": "assistant", "model": "claude-sonnet-4-20250514",
+			"content":     []map[string]any{{"type": "text", "text": "The file was not found."}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]int{"input_tokens": 15, "output_tokens": 8},
+		})
+	})
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	tools := []ToolDef{
+		{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters: map[string]any{
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "File path"},
+				},
+				"required": []string{"path"},
+			},
+		},
+	}
+
+	ctx := t.Context()
+	text, _, _, _, err := callAnthropic(ctx, "key", srv.URL, "claude-sonnet-4-20250514", "sys", "Read /nonexistent/file.txt", tools)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "The file was not found." {
+		t.Errorf("text = %q, want %q", text, "The file was not found.")
+	}
+
+	// Verify the is_error field was set on the tool_result.
+	messages, _ := capturedBody["messages"].([]any)
+	lastMsg, _ := messages[len(messages)-1].(map[string]any)
+	content, _ := lastMsg["content"].([]any)
+	for _, c := range content {
+		block, _ := c.(map[string]any)
+		if block["type"] == "tool_result" {
+			isErr, _ := block["is_error"].(bool)
+			if !isErr {
+				t.Error("expected is_error=true for tool result starting with 'Error:'")
+			}
+		}
+	}
+}
