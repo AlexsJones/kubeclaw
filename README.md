@@ -23,7 +23,26 @@
 </p>
 
 ---
-### Quick Install (macOS / Linux)
+### Install
+
+#### Control Plane (Kubernetes)
+
+Deploy the Sympozium control plane to your cluster using Helm:
+
+```bash
+helm install sympozium ./charts/sympozium
+```
+
+**Prerequisites:** [cert-manager](https://cert-manager.io/) (for webhook TLS):
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.1/cert-manager.yaml
+```
+
+See [`charts/sympozium/values.yaml`](charts/sympozium/values.yaml) for all configuration options (replicas, resources, external NATS, network policies, etc.).
+
+#### CLI (local machine)
+
+The CLI connects to an existing Sympozium control plane. Install it separately:
 
 **Homebrew:**
 ```bash
@@ -34,6 +53,15 @@ brew install sympozium
 **Shell installer:**
 ```bash
 curl -fsSL https://deploy.sympozium.ai/install.sh | sh
+```
+
+#### All-in-one (CLI + control plane)
+
+The CLI can also bootstrap the control plane directly — ideal for quick starts and local development:
+
+```bash
+sympozium install
+sympozium onboard
 ```
 
 📖 **New here?** See the [Getting Started guide](docs/getting-started.md) — install, deploy, onboard your first agent, and learn the TUI and CLI commands.
