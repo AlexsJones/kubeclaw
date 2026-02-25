@@ -7,6 +7,21 @@ and using both the interactive TUI and the CLI to create and manage AI agents.
 
 ## 1. Install the CLI
 
+### Homebrew (macOS / Linux — recommended)
+
+```sh
+brew tap AlexsJones/kubeclaw
+brew install kubeclaw
+```
+
+To upgrade later:
+
+```sh
+brew update && brew upgrade kubeclaw
+```
+
+### Shell installer
+
 Run the installer — it will place the `kubeclaw` binary in `~/.local/bin` (or
 `/usr/local/bin` if it is writable):
 
