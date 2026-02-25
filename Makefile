@@ -62,6 +62,7 @@ test-integration: ## Run integration tests (requires Kind cluster + OPENAI_API_K
 	./test/integration/test-write-file.sh
 	./test/integration/test-k8s-ops-nodes.sh
 	./test/integration/test-telegram-channel.sh
+	./test/integration/test-slack-channel.sh
 
 vet: ## Run go vet
 	$(GOVET) ./...
