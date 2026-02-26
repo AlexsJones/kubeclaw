@@ -1,7 +1,8 @@
 # Getting Started with Sympozium
 
-This guide walks you through installing Sympozium, onboarding your first agent,
-and setting up practical agent patterns for SRE, security, and DevOps workflows.
+This guide walks you through installing Sympozium, activating your first
+PersonaPack, and setting up practical agent patterns for SRE, security, and
+DevOps workflows.
 
 ---
 
@@ -54,15 +55,64 @@ idempotent — safe to run again if something changes.
 
 ---
 
-## Onboard your first agent
+## Onboard your agents
 
-Sympozium offers two onboarding paths: an **interactive TUI wizard** (default)
-and a **plain console fallback** for headless / CI environments.
+Sympozium offers two onboarding paths:
 
-### TUI wizard (recommended)
+1. **PersonaPacks (recommended)** — activate a pre-built bundle of agents via
+   the TUI wizard. One action creates multiple purpose-built agents with skills,
+   schedules, memory, and tool policies.
+2. **Manual onboard** — create a single SympoziumInstance with `sympozium onboard`.
+   Best for custom setups or CI/headless environments.
+
+### PersonaPack activation (recommended)
+
+Launch the TUI:
 
 ```bash
-sympozium onboard
+sympozium
+```
+
+The TUI opens on the **Personas** tab, listing the built-in PersonaPacks:
+
+| Pack | Personas | Focus |
+|------|----------|-------|
+| `platform-team` | security-guardian, sre-watchdog, platform-engineer | Security audit, cluster health, scheduled ops |
+| `devops-essentials` | incident-responder, cost-analyzer | Incident triage, resource optimisation |
+
+Press **Enter** on a pack to start the activation wizard:
+
+| Step | What it does |
+|------|-------------|
+| **1 — Pick personas** | Review the personas in the pack, deselect any you don't need |
+| **2 — Provider** | Choose your LLM provider (OpenAI, Anthropic, Azure OpenAI, Ollama, or custom endpoint) |
+| **3 — API key** | Paste your API key (stored as a Kubernetes Secret) |
+| **4 — Model** | Pick a model (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `llama3`) |
+| **5 — Channels** | Optionally bind messaging channels (Telegram, Slack, Discord, WhatsApp) |
+| **6 — Confirm** | Review and apply — the controller creates all agents automatically |
+
+Within seconds you'll have multiple agents running on schedules, each with
+their own skills, memory, and tool policies. The TUI switches to the
+**Instances** tab where you can see them come online.
+
+**What gets created:**
+
+For each persona in the pack, the PersonaPack controller creates:
+
+- A **SympoziumInstance** — the agent identity with model, skills, and auth
+- A **SympoziumSchedule** — the recurring task (heartbeat, sweep, or cron)
+- A **ConfigMap** — persistent memory seeded with initial context
+
+All resources are owned by the PersonaPack — deleting the pack cascades to
+everything it created.
+
+### Manual onboard (single instance)
+
+For a single custom agent, or in headless/CI environments:
+
+```bash
+sympozium onboard           # TUI wizard
+sympozium onboard --console # plain text fallback for CI
 ```
 
 The wizard walks you through six steps:
@@ -84,17 +134,6 @@ The wizard creates:
 - A **SympoziumSchedule** heartbeat (unless you chose "disabled")
 
 After onboarding you land in the TUI dashboard — your agent is live.
-
-### Console fallback
-
-If your terminal does not support the TUI (e.g. a plain SSH session or CI
-pipeline), pass `--console`:
-
-```bash
-sympozium onboard --console
-```
-
-You will get the same six prompts as numbered menus in plain text.
 
 ---
 
@@ -148,11 +187,19 @@ default policy lets read-only tools run freely and asks for approval before
 
 ---
 
-## Agent patterns
+## Agent patterns (what PersonaPacks create)
 
-Below are three practical agent personas you can set up. Each combines a
-**SympoziumInstance**, one or more **SkillPacks**, and a tailored **heartbeat** to
+The following patterns show the resources that PersonaPacks generate
+automatically. You can also create these manually if you prefer fine-grained
+control.
+
+Below are three practical agent personas. Each combines a
+**SympoziumInstance**, one or more **SkillPacks**, and a tailored **schedule** to
 create a purpose-built agent.
+
+> **Tip:** The `platform-team` PersonaPack creates the SRE and Security agents
+> below automatically. The `devops-essentials` pack creates the Incident
+> Responder. You only need to write YAML manually for custom personas.
 
 ### 1. SRE On-Call Agent
 
@@ -433,6 +480,61 @@ kubectl get agentrun quick-check -w   # watch status.phase
 ```
 
 The phase transitions: `Pending` → `Running` → `Succeeded` (or `Failed`).
+
+---
+
+## Creating custom PersonaPacks
+
+You can create your own PersonaPack to bundle a set of agents tailored to your
+team. Save this as a YAML file and apply it:
+
+```yaml
+apiVersion: sympozium.ai/v1alpha1
+kind: PersonaPack
+metadata:
+  name: my-team
+spec:
+  description: "Custom agents for my team"
+  category: custom
+  version: "1.0.0"
+  personas:
+    - name: log-analyzer
+      displayName: "Log Analyzer"
+      systemPrompt: |
+        You are a log analysis specialist. You parse structured and
+        unstructured logs to identify errors, anomalies, and trends.
+      skills:
+        - k8s-ops
+      schedule:
+        type: sweep
+        interval: "1h"
+        task: "Scan pod logs across all namespaces for ERROR and FATAL entries from the last hour."
+      memory:
+        enabled: true
+        seeds:
+          - "Focus on patterns that repeat across multiple pods"
+    - name: doc-writer
+      displayName: "Documentation Writer"
+      systemPrompt: |
+        You are a technical writer. You review cluster configuration,
+        CRDs, and RBAC policies, then produce clear documentation.
+      skills:
+        - k8s-ops
+        - code-review
+      schedule:
+        type: scheduled
+        cron: "0 8 * * 1"
+        task: "Audit all namespaces and produce a weekly cluster inventory report."
+      memory:
+        enabled: true
+```
+
+```bash
+kubectl apply -f my-team-personapack.yaml
+```
+
+The pack appears in the TUI Personas tab in `Pending` phase. Press Enter to
+activate it with your API key — the controller does the rest.
 
 ---
 

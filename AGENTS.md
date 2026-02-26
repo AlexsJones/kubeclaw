@@ -17,7 +17,7 @@ Sympozium is a **Kubernetes-native agent orchestration platform** written in Go.
 ## Repository Layout
 
 ```
-api/v1alpha1/           # CRD type definitions (SympoziumInstance, AgentRun, SympoziumPolicy, SkillPack, SympoziumSchedule)
+api/v1alpha1/           # CRD type definitions (SympoziumInstance, AgentRun, SympoziumPolicy, SkillPack, SympoziumSchedule, PersonaPack)
 cmd/
   agent-runner/         # Agent container — LLM loop + tool execution
   apiserver/            # HTTP + WebSocket API server
@@ -33,15 +33,17 @@ channels/
 config/
   crd/bases/            # Generated CRD YAML manifests
   manager/              # Controller manager deployment
+  personas/             # Built-in PersonaPack YAML definitions
   rbac/                 # RBAC roles
   samples/              # Sample CR YAML files
   skills/               # Built-in SkillPack YAML definitions
+  policies/             # Built-in SympoziumPolicy presets
   webhook/              # Webhook configuration
 images/                 # Dockerfiles for all components
 internal/
   apiserver/            # API server implementation
   channel/              # Channel types
-  controller/           # Reconcilers (AgentRun, SympoziumInstance, SympoziumPolicy, SympoziumSchedule, SkillPack) + routers (Channel, Schedule)
+  controller/           # Reconcilers (AgentRun, SympoziumInstance, SympoziumPolicy, SympoziumSchedule, SkillPack, PersonaPack) + routers (Channel, Schedule)
   eventbus/             # NATS JetStream client + topic constants
   ipc/                  # IPC bridge (fsnotify watcher, protocol, file handlers)
   orchestrator/         # Pod builder + spawner for agent Jobs
@@ -63,6 +65,7 @@ docs/                   # Design & contributor documentation
 | `SympoziumPolicy` | Policy rules enforced by the admission webhook |
 | `SkillPack` | Bundled skills (Markdown instructions) + optional sidecar container + RBAC |
 | `SympoziumSchedule` | Cron-based recurring AgentRun creation (heartbeat, scheduled, sweep) |
+| `PersonaPack` | Pre-configured agent bundles — stamps out Instances, Schedules, and memory automatically |
 
 Type definitions live in `api/v1alpha1/`. After modifying types, regenerate with:
 
@@ -240,6 +243,7 @@ SkillPacks are CRDs containing Markdown instructions + optional sidecar definiti
 | Writing integration tests | `docs/writing-integration-tests.md` | Test patterns and templates |
 | Sample CRs | `config/samples/` | Example SympoziumInstance, AgentRun, SympoziumPolicy, SympoziumSchedule, SkillPack |
 | CRD definitions | `api/v1alpha1/` | Go type definitions for all CRDs |
+| Built-in PersonaPacks | `config/personas/` | Pre-configured agent bundles (platform-team, devops-essentials) |
 
 ---
 
@@ -264,6 +268,12 @@ SkillPacks are CRDs containing Markdown instructions + optional sidecar definiti
 2. Run `make generate` to regenerate deepcopy and CRD YAML
 3. Run `make install` to apply updated CRDs to cluster
 4. Update the reconciler in `internal/controller/`
+
+### Adding a PersonaPack
+1. Create a YAML file in `config/personas/<name>.yaml`
+2. Define personas with system prompts, skills, schedules, and memory seeds
+3. Apply: `kubectl apply -f config/personas/<name>.yaml`
+4. Activate via the TUI Personas tab or by patching `spec.authRefs` with kubectl
 
 ### Rebuilding after changes
 ```bash

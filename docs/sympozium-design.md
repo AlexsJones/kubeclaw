@@ -63,6 +63,12 @@ Sympozium takes the best of both:
   │   │              │  │  (spawn, wait)  │  │                          │  │
   │   └──────────────┘  └───────┬────────┘  └──────────────────────────┘  │
   │                             │                                          │
+  │   ┌──────────────────────┐  │  ┌───────────────────────────────────┐  │
+  │   │  PersonaPack         │  │  │  Reconcilers: Instance, Policy,  │  │
+  │   │  Controller          │  │  │  Schedule, SkillPack, AgentRun   │  │
+  │   │  (stamp out agents)  │  │  │                                   │  │
+  │   └──────────────────────┘  │  └───────────────────────────────────┘  │
+  │                             │                                          │
   │   ┌─────────────────────────┼──────────────────────────────────────┐  │
   │   │  Event Bus (NATS / Redis Streams)                              │  │
   │   └─────────────────────────┼──────────────────────────────────────┘  │
@@ -438,6 +444,103 @@ spec:
         resources: ["nodes", "namespaces"]
         verbs: ["get", "list", "watch"]
 ```
+
+### 3.5 `PersonaPack` — pre-configured agent bundles
+
+PersonaPacks are the highest-level abstraction in Sympozium. A single
+PersonaPack CRD bundles multiple agent personas — each with a system prompt,
+skills, tool policy, schedule, and memory seeds — into a one-click installable
+package. Think of them as **Helm Charts for AI agents**.
+
+When a PersonaPack is activated (via the TUI wizard or kubectl), the controller
+stamps out all the underlying resources automatically:
+
+```
+PersonaPack CR (spec.personas[])
+  │
+  ├─ For each persona:
+  │   ├─ Create SympoziumInstance (inherits model, authRefs, policyRef)
+  │   ├─ Create SympoziumSchedule (from persona.schedule)
+  │   └─ Create ConfigMap (<name>-memory, from persona.memory.seeds)
+  │
+  ├─ Set ownerReferences on all generated resources
+  │   └─ Deleting the PersonaPack cascades to all children
+  │
+  └─ Update status:
+      ├─ status.personaCount = len(spec.personas)
+      ├─ status.installedCount = successfully created
+      ├─ status.installedPersonas[] = {name, instanceName, scheduleName}
+      └─ status.phase = Ready | Pending | Error
+```
+
+**Lifecycle phases:**
+
+| Phase | Meaning |
+|-------|---------|
+| `Pending` | PersonaPack exists but `authRefs` are empty — waiting for activation |
+| `Ready` | All personas successfully stamped out |
+| `Error` | One or more personas failed to reconcile |
+
+**CRD spec:**
+
+```yaml
+apiVersion: sympozium.ai/v1alpha1
+kind: PersonaPack
+metadata:
+  name: platform-team
+spec:
+  description: "Core platform engineering agents"
+  category: platform
+  version: "1.0.0"
+
+  # Personas — each becomes a SympoziumInstance + Schedule
+  personas:
+    - name: security-guardian
+      displayName: "Security Guardian"
+      systemPrompt: |
+        You are a Kubernetes security specialist...
+      skills:
+        - k8s-ops
+      toolPolicy:
+        allow: [read_file, list_directory, execute_command, fetch_url]
+        deny: [write_file]
+      schedule:
+        type: sweep
+        interval: "30m"
+        task: "Scan all namespaces for security policy violations..."
+      memory:
+        enabled: true
+        seeds:
+          - "Follow CIS Kubernetes Benchmark v1.8 guidelines"
+    - name: sre-watchdog
+      # ... additional personas
+
+  # Shared auth — patched by the TUI wizard during activation
+  authRefs:
+    - secret: platform-team-openai-key
+
+  # Shared policy reference
+  policyRef: default-policy
+```
+
+**Ownership model:** All generated resources (Instances, Schedules, ConfigMaps)
+carry an `ownerReference` pointing back to the PersonaPack. This gives
+Kubernetes-native cascading deletion — removing the PersonaPack removes
+everything it created. The controller uses `controllerutil.SetControllerReference`
+to establish the owner chain.
+
+**TUI activation flow:** The TUI Personas tab lists all PersonaPacks in the
+cluster. Pressing Enter on a pack launches a wizard that collects provider,
+API key, and model selection, then creates a Secret and patches the PersonaPack's
+`spec.authRefs`. The controller detects the authRef and reconciles all personas
+into running instances.
+
+**Built-in packs:** Sympozium ships with two PersonaPacks in `config/personas/`:
+
+| Pack | Personas | Focus |
+|------|----------|-------|
+| `platform-team` | security-guardian, sre-watchdog, platform-engineer | Security audit, cluster health, scheduled ops |
+| `devops-essentials` | incident-responder, cost-analyzer | Incident triage, resource optimisation |
 
 ---
 
@@ -1071,6 +1174,7 @@ them to object storage in batches.
 | Per-group isolation | Group folder + session dir | Per-`AgentRun` pod with isolated volumes |
 | Credential filtering | `readSecrets()` | K8s Secrets mounted only into authorized pods |
 | `OUTPUT_START/END_MARKER` | `container-runner.ts` | IPC bridge structured JSON protocol |
+| N/A | N/A | **`PersonaPack` CRD** — bundles multiple agent personas into one installable unit; stamps out Instances, Schedules, and memory automatically |
 
 ---
 

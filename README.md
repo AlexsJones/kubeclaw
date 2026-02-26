@@ -41,12 +41,14 @@ brew install sympozium
 curl -fsSL https://deploy.sympozium.ai/install.sh | sh
 ```
 
-Then deploy to your cluster and onboard your first agent:
+Then deploy to your cluster and activate your first agents:
 
 ```bash
-sympozium install
-sympozium onboard
+sympozium install          # deploys CRDs, controllers, and built-in PersonaPacks
+sympozium                  # launch the TUI — go to Personas tab, press Enter to onboard
 ```
+
+Sympozium ships with **PersonaPacks** — pre-configured bundles of agents that you activate with a few keypresses. No YAML required. See [PersonaPacks](#personapacks) below.
 
 📖 **New here?** See the [Getting Started guide](docs/getting-started.md) — install, deploy, onboard your first agent, and learn the TUI and CLI commands.
 
@@ -142,7 +144,7 @@ graph TB
         direction TB
 
         subgraph CP["Control Plane"]
-            CM["Controller Manager<br/><small>SympoziumInstance · AgentRun<br/>SympoziumPolicy · SkillPack · SympoziumSchedule</small>"]
+            CM["Controller Manager<br/><small>SympoziumInstance · AgentRun · PersonaPack<br/>SympoziumPolicy · SkillPack · SympoziumSchedule</small>"]
             API["API Server<br/><small>HTTP + WebSocket</small>"]
             WH["Admission Webhook<br/><small>Policy enforcement</small>"]
             NATS[("NATS JetStream<br/><small>Event bus</small>")]
@@ -280,6 +282,101 @@ Sympozium models every agentic concept as a Kubernetes Custom Resource:
 | `SympoziumPolicy` | NetworkPolicy | Feature and tool gating — what an agent can and cannot do |
 | `SkillPack` | ConfigMap | Portable skill bundles — kubectl, Helm, or custom tools — mounted into agent pods as files, with optional sidecar containers for cluster ops |
 | `SympoziumSchedule` | CronJob | Recurring tasks — heartbeats, sweeps, scheduled runs with cron expressions |
+| `PersonaPack` | Helm Chart / Operator Bundle | Pre-configured agent bundles — activating a pack stamps out instances, schedules, and memory for each persona |
+
+### PersonaPacks
+
+PersonaPacks are the **recommended way to get started** with Sympozium. A PersonaPack is a CRD that bundles multiple pre-configured agent personas — each with a system prompt, skills, tool policy, schedule, and memory seeds. Activating a pack is a single action: the PersonaPack controller stamps out all the Kubernetes resources automatically.
+
+**Why PersonaPacks?**
+
+Without PersonaPacks, setting up even one agent requires creating a Secret, SympoziumInstance, SympoziumSchedule, and memory ConfigMap by hand. PersonaPacks collapse that into: pick a pack → enter your API key → done.
+
+**How it works:**
+
+```
+PersonaPack "platform-team" (3 personas)
+  │
+  ├── Activate via TUI (Enter on pack → wizard → API key → confirm)
+  │
+  └── Controller stamps out:
+      ├── Secret: platform-team-openai-key
+      ├── SympoziumInstance: platform-team-security-guardian
+      │   ├── SympoziumSchedule: ...security-guardian-schedule (every 30m)
+      │   └── ConfigMap: ...security-guardian-memory (seeded)
+      ├── SympoziumInstance: platform-team-sre-watchdog
+      │   ├── SympoziumSchedule: ...sre-watchdog-schedule (every 5m)
+      │   └── ConfigMap: ...sre-watchdog-memory (seeded)
+      └── SympoziumInstance: platform-team-platform-engineer
+          ├── SympoziumSchedule: ...platform-engineer-schedule (weekdays 9am)
+          └── ConfigMap: ...platform-engineer-memory (seeded)
+```
+
+All generated resources have `ownerReferences` pointing back to the PersonaPack — delete the pack and everything gets garbage-collected.
+
+**Built-in packs:**
+
+| Pack | Category | Agents | Description |
+|------|----------|--------|-------------|
+| `platform-team` | Platform | Security Guardian, SRE Watchdog, Platform Engineer | Core platform engineering — security audits, cluster health, manifest review |
+| `devops-essentials` | DevOps | Incident Responder, Cost Analyzer | DevOps workflows — incident triage, resource right-sizing |
+
+**Activating a pack in the TUI:**
+
+1. Launch `sympozium` — the TUI opens on the **Personas** tab (view 1)
+2. Select a pack and press **Enter** to start the onboarding wizard
+3. Choose your AI provider and paste an API key
+4. Optionally bind channels (Telegram, Slack, Discord, WhatsApp)
+5. Confirm — the controller creates all instances within seconds
+
+**Activating via kubectl:**
+
+```yaml
+# 1. Create the provider secret
+kubectl create secret generic my-pack-openai-key \
+  --from-literal=OPENAI_API_KEY=sk-...
+
+# 2. Patch the PersonaPack with authRefs to trigger activation
+kubectl patch personapack platform-team --type=merge -p '{
+  "spec": {
+    "authRefs": [{"provider": "openai", "secret": "my-pack-openai-key"}]
+  }
+}'
+```
+
+The controller detects the `authRefs` change and reconciles — creating SympoziumInstances, Schedules, and memory ConfigMaps for each persona.
+
+**Writing your own PersonaPack:**
+
+```yaml
+apiVersion: sympozium.ai/v1alpha1
+kind: PersonaPack
+metadata:
+  name: my-team
+spec:
+  description: "My custom agent team"
+  category: custom
+  version: "1.0.0"
+  personas:
+    - name: my-agent
+      displayName: "My Agent"
+      systemPrompt: |
+        You are a helpful assistant that monitors the cluster.
+      skills:
+        - k8s-ops
+      toolPolicy:
+        allow: [read_file, list_directory, execute_command, fetch_url]
+      schedule:
+        type: heartbeat
+        interval: "1h"
+        task: "Check cluster health and report any issues."
+      memory:
+        enabled: true
+        seeds:
+          - "Track recurring issues for trend analysis"
+```
+
+Apply it with `kubectl apply -f my-team.yaml`, then activate through the TUI.
 
 ### Skill Sidecars
 
@@ -358,13 +455,14 @@ Running `sympozium` with no arguments launches a **k9s-style interactive termina
 
 | Key | View | Description |
 |-----|------|-------------|
-| `1` | Instances | SympoziumInstance list with status, channels, memory config |
-| `2` | Runs | AgentRun list with phase, duration, result preview |
-| `3` | Policies | SympoziumPolicy list with feature gates |
-| `4` | Skills | SkillPack list with file counts |
-| `5` | Channels | Channel pod status (Telegram, Slack, Discord, WhatsApp) |
-| `6` | Pods | All sympozium pods with status and restarts |
+| `1` | Personas | PersonaPack list — press Enter to activate a pack and create agents |
+| `2` | Instances | SympoziumInstance list with status, channels, memory config |
+| `3` | Runs | AgentRun list with phase, duration, result preview |
+| `4` | Policies | SympoziumPolicy list with feature gates |
+| `5` | Skills | SkillPack list with file counts |
+| `6` | Channels | Channel pod status (Telegram, Slack, Discord, WhatsApp) |
 | `7` | Schedules | SympoziumSchedule list with cron, type, phase, run count |
+| `8` | Pods | All sympozium pods with status and restarts |
 
 ### Keybindings
 
@@ -385,6 +483,7 @@ Running `sympozium` with no arguments launches a **k9s-style interactive termina
 | `/run <task>` | Create and submit an AgentRun |
 | `/schedule <instance> <cron> <task>` | Create a SympoziumSchedule |
 | `/memory <instance>` | View persistent memory for an instance |
+| `/personas` | Switch to PersonaPacks view |
 | `/instances` `/runs` `/channels` `/schedules` | Switch views |
 | `/delete <type> <name>` | Delete a resource with confirmation |
 
@@ -410,7 +509,27 @@ Applies CRDs, RBAC, controller manager, API server, admission webhook, NATS even
 sympozium install --version v0.0.13   # specific version
 ```
 
-### 3. Onboard — interactive setup wizard
+### 3. Activate a PersonaPack (recommended)
+
+Launch the TUI and activate one of the built-in PersonaPacks:
+
+```bash
+sympozium
+```
+
+The TUI opens on the **Personas** tab. Press **Enter** on a pack (e.g. `platform-team`) to start the onboarding wizard:
+
+1. Choose your AI provider (OpenAI, Anthropic, Azure, Ollama, or custom)
+2. Paste your API key
+3. Pick a model
+4. Optionally bind messaging channels
+5. Confirm — the controller creates all agent instances automatically
+
+Within seconds you'll have multiple purpose-built agents running on schedules, each with their own skills, memory, and tool policies.
+
+### Alternative: Manual onboard (single instance)
+
+If you prefer to create a single instance manually:
 
 ```bash
 sympozium onboard
@@ -465,7 +584,7 @@ sympozium uninstall
 
 ```
 sympozium/
-├── api/v1alpha1/           # CRD type definitions (SympoziumInstance, AgentRun, SympoziumPolicy, SkillPack, SympoziumSchedule)
+├── api/v1alpha1/           # CRD type definitions (SympoziumInstance, AgentRun, SympoziumPolicy, SkillPack, SympoziumSchedule, PersonaPack)
 ├── cmd/                    # Binary entry points
 │   ├── agent-runner/       # LLM agent runner (runs inside agent pods)
 │   ├── controller/         # Controller manager (reconciles all CRDs)
@@ -474,7 +593,7 @@ sympozium/
 │   ├── webhook/            # Admission webhook (policy enforcement)
 │   └── sympozium/            # CLI + interactive TUI
 ├── internal/               # Internal packages
-│   ├── controller/         # Kubernetes controllers (5 reconcilers)
+│   ├── controller/         # Kubernetes controllers (6 reconcilers incl. PersonaPack)
 │   ├── orchestrator/       # Agent pod builder & spawner
 │   ├── apiserver/          # API server handlers
 │   ├── eventbus/           # NATS JetStream event bus
@@ -492,6 +611,9 @@ sympozium/
 │   ├── network/            # NetworkPolicy for agent isolation
 │   ├── nats/               # NATS JetStream deployment
 │   ├── cert/               # TLS certificate resources
+│   ├── personas/           # Built-in PersonaPack definitions
+│   ├── skills/             # Built-in SkillPack definitions
+│   ├── policies/           # Default SympoziumPolicy presets
 │   └── samples/            # Example CRs
 ├── migrations/             # PostgreSQL schema migrations
 ├── docs/                   # Design documentation
@@ -512,6 +634,7 @@ sympozium/
 | **Schedule-as-CRD** | CronJob analogy | `SympoziumSchedule` resources define recurring tasks with cron expressions — the controller creates AgentRuns, not the user |
 | **Skills-as-ConfigMap** | ConfigMap volume | SkillPacks generate ConfigMaps mounted into agent pods — portable, versionable, namespace-scoped |
 | **Skill sidecars with auto-RBAC** | Role / ClusterRole | SkillPacks can declare sidecar containers with RBAC rules — the controller injects the container and provisions ephemeral, least-privilege RBAC per run |
+| **PersonaPacks** | Operator Bundle | Pre-configured agent bundles — the controller stamps out SympoziumInstances, Schedules, and memory ConfigMaps. Activating a pack is a single TUI action |
 
 ## Configuration
 
