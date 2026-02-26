@@ -13,7 +13,9 @@
 </p>
 
 <p align="center">
-**This project is under active development. API's will change, things will be break. Be brave.**
+  <b>
+  This project is under active development. API's will change, things will be break. Be brave.
+  <b />
 </p>
 <p align="center">
   <a href="https://github.com/AlexsJones/sympozium/actions"><img src="https://github.com/AlexsJones/sympozium/actions/workflows/build.yaml/badge.svg" alt="Build"></a>
