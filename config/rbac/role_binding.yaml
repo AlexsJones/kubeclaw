@@ -1,0 +1,16 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sympozium-manager-rolebinding
+  labels:
+    app.kubernetes.io/name: sympozium
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sympozium-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: sympozium-controller-manager
+    namespace: sympozium-system
