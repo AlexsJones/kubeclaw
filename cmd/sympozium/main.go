@@ -7890,16 +7890,19 @@ func tuiPersonaApply(ns string, w *wizardState) (string, error) {
 		return "", fmt.Errorf("get PersonaPack: %w", err)
 	}
 
+	// On first activation, enable all personas by default.
+	// On re-activation (updating auth/model), preserve the user's exclusion choices.
+	firstActivation := len(pack.Spec.AuthRefs) == 0
+	if firstActivation {
+		pack.Spec.ExcludePersonas = nil
+	}
+
 	pack.Spec.AuthRefs = []sympoziumv1alpha1.SecretRef{
 		{
 			Provider: w.providerName,
 			Secret:   secretName,
 		},
 	}
-
-	// Enable all personas — clear any previous exclusions so the controller
-	// stamps out every instance defined in the pack.
-	pack.Spec.ExcludePersonas = nil
 
 	// Update each persona with the chosen model and channel bindings.
 	var enabledChannels []string
