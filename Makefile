@@ -106,6 +106,16 @@ docker-push: $(addprefix docker-push-,$(IMAGES)) ## Push all Docker images
 docker-push-%: ## Push a specific Docker image
 	docker push $(REGISTRY)/$*:$(TAG)
 
+KIND_CLUSTER ?= kind
+
+kind-load: $(addprefix kind-load-,$(IMAGES)) ## Load all Docker images into Kind
+
+kind-load-%: ## Load a specific image into Kind (e.g., make kind-load-controller)
+	kind load docker-image $(REGISTRY)/$*:$(TAG) --name $(KIND_CLUSTER)
+
+kind-reload: docker-build kind-load ## Build all images and load into Kind
+	kubectl rollout restart deployment sympozium-controller-manager -n sympozium-system
+
 set-images: ## Stamp REGISTRY/TAG into K8s manifests
 	cd config/manager && kustomize edit set image \
 		controller=$(REGISTRY)/controller:$(TAG) \
@@ -116,8 +126,12 @@ set-images: ## Stamp REGISTRY/TAG into K8s manifests
 
 ##@ Deployment
 
-install: manifests ## Install CRDs into the K8s cluster
+install: manifests ## Install CRDs, skills, personas, and policies into the K8s cluster
 	kubectl apply -f config/crd/bases/
+	kubectl create namespace sympozium-system --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -f config/skills/
+	kubectl apply -f config/personas/
+	kubectl apply -f config/policies/
 
 uninstall: ## Uninstall CRDs from the K8s cluster
 	kubectl delete -f config/crd/bases/
@@ -139,7 +153,7 @@ db-migrate: ## Run database migrations
 
 ##@ Helm
 
-helm-sync: manifests ## Sync CRDs and appVersion into the Helm chart
+helm-sync: ## Sync CRDs and appVersion into the Helm chart
 	@echo "Syncing CRDs to charts/sympozium/crds/..."
 	@mkdir -p charts/sympozium/crds
 	cp config/crd/bases/*.yaml charts/sympozium/crds/

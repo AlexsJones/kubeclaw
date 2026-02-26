@@ -958,6 +958,7 @@ func kubectlApplyStdin(yaml string) error {
 
 func newInstallCmd() *cobra.Command {
 	var manifestVersion string
+	var imageTag string
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install Sympozium into the current Kubernetes cluster",
@@ -965,12 +966,16 @@ func newInstallCmd() *cobra.Command {
 them to your current Kubernetes cluster using kubectl.
 
 Installs CRDs, the controller manager, API server, admission webhook,
-RBAC rules, and network policies.`,
+RBAC rules, and network policies.
+
+Use --image-tag to override the container image tag in the manifests,
+for example when you have sideloaded images into Kind with a custom tag.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInstall(manifestVersion)
+			return runInstall(manifestVersion, imageTag)
 		},
 	}
 	cmd.Flags().StringVar(&manifestVersion, "version", "", "Release version to install (default: latest)")
+	cmd.Flags().StringVar(&imageTag, "image-tag", "", "Override image tag in manifests (e.g. 'latest')")
 	return cmd
 }
 
@@ -984,9 +989,9 @@ func newUninstallCmd() *cobra.Command {
 	}
 }
 
-func runInstall(ver string) error {
-	if ver == "" {
-		if version != "dev" {
+func runInstall(ver, imageTag string) error {
+	if ver == "" || ver == "latest" {
+		if version != "dev" && ver == "" {
 			ver = version
 		} else {
 			v, err := resolveLatestTag()
@@ -1019,6 +1024,19 @@ func runInstall(ver string) error {
 	tar.Stderr = os.Stderr
 	if err := tar.Run(); err != nil {
 		return fmt.Errorf("extract manifests: %w", err)
+	}
+
+	// Rewrite image tags if --image-tag was provided.
+	if imageTag != "" {
+		fmt.Printf("  Rewriting image tags to :%s...\n", imageTag)
+		sed := exec.Command("find", filepath.Join(tmpDir, "config"), "-name", "*.yaml", "-exec",
+			"sed", "-i",
+			fmt.Sprintf(`s|ghcr.io/alexsjones/sympozium/\([^:]*\):[^ ]*|ghcr.io/alexsjones/sympozium/\1:%s|g`, imageTag),
+			"{}", "+")
+		sed.Stderr = os.Stderr
+		if err := sed.Run(); err != nil {
+			return fmt.Errorf("rewrite image tags: %w", err)
+		}
 	}
 
 	// Apply CRDs first (server-side apply to handle schema updates cleanly).
@@ -1108,6 +1126,16 @@ func runInstall(ver string) error {
 		}
 	}
 
+	// Install default PersonaPacks (e.g. platform-team, devops-essentials).
+	personasDir := filepath.Join(tmpDir, "config/personas/")
+	if _, err := os.Stat(personasDir); err == nil {
+		fmt.Println("  Installing default PersonaPacks...")
+		if err := kubectl("apply", "--server-side", "--force-conflicts", "-f", personasDir); err != nil {
+			// Non-fatal — persona packs are optional.
+			fmt.Printf("  Warning: failed to install default persona packs: %v\n", err)
+		}
+	}
+
 	fmt.Println("\n  Sympozium installed successfully!")
 	fmt.Println("  Run: sympozium")
 	return nil
@@ -1135,7 +1163,7 @@ func runUninstall() error {
 	// Strip finalizers from all Sympozium CRD instances so CRD deletion doesn't
 	// hang waiting for the (now-deleted) controller to reconcile them.
 	fmt.Println("  Removing finalizers from Sympozium resources...")
-	for _, res := range []string{"agentruns", "sympoziuminstances", "sympoziumpolicies", "skillpacks", "sympoziumschedules"} {
+	for _, res := range []string{"agentruns", "sympoziuminstances", "sympoziumpolicies", "skillpacks", "sympoziumschedules", "personapacks"} {
 		stripFinalizers(res)
 	}
 
@@ -1147,6 +1175,7 @@ func runUninstall() error {
 		"sympozium.ai_sympoziumpolicies.yaml",
 		"sympozium.ai_skillpacks.yaml",
 		"sympozium.ai_sympoziumschedules.yaml",
+		"sympozium.ai_personapacks.yaml",
 	}
 	for _, c := range crds {
 		_ = kubectl("delete", "--ignore-not-found", "-f", crdBase+c)
@@ -1259,17 +1288,17 @@ func resolveConfigPath(bundleDir, relPath string) string {
 type tuiViewKind int
 
 const (
-	viewInstances tuiViewKind = iota
+	viewPersonas tuiViewKind = iota
+	viewInstances
 	viewRuns
 	viewPolicies
 	viewSkills
 	viewChannels
-	viewPods
 	viewSchedules
-	viewPersonas
+	viewPods
 )
 
-var viewNames = []string{"Instances", "Runs", "Policies", "Skills", "Channels", "Pods", "Schedules", "Personas"}
+var viewNames = []string{"Personas", "Instances", "Runs", "Policies", "Skills", "Channels", "Schedules", "Pods"}
 
 // detailPaneState controls the visibility of the right-hand detail pane.
 type detailPaneState int
@@ -1477,7 +1506,7 @@ var slashCommandSuggestions = []suggestion{
 	{"/schedule", "Create schedule: /schedule <inst> <cron> <task>"},
 	{"/schedules", "View schedules"},
 	{"/personas", "View PersonaPacks"},
-	{"/persona", "Install persona pack: /persona install <name>"},
+	{"/persona", "Manage persona pack: /persona delete <name>"},
 	{"/memory", "View memory: /memory <inst>"},
 	{"/ns", "Switch namespace: /ns <name>"},
 	{"/onboard", "Interactive setup wizard"},
@@ -1686,7 +1715,7 @@ var tuiCommands = []struct{ cmd, desc string }{
 	{"O", "Launch onboard wizard"},
 	{"x", "Delete selected resource"},
 	{"e", "Edit memory / heartbeat config"},
-	{"Enter", "Show detail / drill in"},
+	{"Enter", "Detail / drill in / onboard persona"},
 	{"r", "Refresh data"},
 }
 
@@ -1733,6 +1762,18 @@ const (
 	wizStepApplying                // auto — create resources
 	wizStepWhatsAppQR              // auto — stream QR from pod logs
 	wizStepDone                    // auto — show result
+
+	// Persona wizard steps
+	wizStepPersonaPick             // menu: select a persona pack
+	wizStepPersonaProvider         // menu 1-6: provider
+	wizStepPersonaBaseURL          // text: base URL
+	wizStepPersonaAPIKey           // text: API key
+	wizStepPersonaModel            // text: model name
+	wizStepPersonaChannels         // multi-toggle: channels to bind
+	wizStepPersonaChannelToken     // text: channel token (per selected channel)
+	wizStepPersonaConfirm          // y/n: confirm summary
+	wizStepPersonaApplying         // auto — patch pack + create resources
+	wizStepPersonaDone             // auto — show result
 )
 
 type wizardState struct {
@@ -1768,10 +1809,31 @@ type wizardState struct {
 
 	// Wizard panel scroll offset for long content (e.g. model lists).
 	scrollOffset int
+
+	// Persona wizard state
+	personaMode       bool   // true when running persona wizard instead of onboard
+	personaPackName   string // which pack we're installing
+	personaChannels   []personaChannelChoice // channels the user is toggling
+	personaChannelIdx int    // which channel we're collecting a token for
 }
 
 func (w *wizardState) reset() {
 	*w = wizardState{}
+}
+
+// personaChannelChoice tracks a channel toggle during persona onboarding.
+type personaChannelChoice struct {
+	chType   string // telegram, slack, discord, whatsapp
+	enabled  bool
+	tokenKey string // env var name (e.g. TELEGRAM_BOT_TOKEN)
+	token    string // user-supplied token value
+}
+
+var defaultPersonaChannels = []personaChannelChoice{
+	{chType: "telegram", tokenKey: "TELEGRAM_BOT_TOKEN"},
+	{chType: "slack", tokenKey: "SLACK_BOT_TOKEN"},
+	{chType: "discord", tokenKey: "DISCORD_BOT_TOKEN"},
+	{chType: "whatsapp", tokenKey: ""}, // QR pairing, no token
 }
 
 type tuiModel struct {
@@ -1903,7 +1965,7 @@ func newTUIModel(ns string) tuiModel {
 		input:        ti,
 		feedInput:    fi,
 		inputFocused: false,
-		activeView:   viewInstances,
+		activeView:   viewPersonas,
 		logLines:     []string{tuiDimStyle.Render("Sympozium TUI ready — press ? for help, / to enter commands")},
 	}
 }
@@ -2650,33 +2712,32 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateSuggestions("/")
 			return m, textinput.Blink
 		case "1":
-			m.activeView = viewInstances
+			m.activeView = viewPersonas
 			m.selectedRow = 0
 			m.tableScroll = 0
 			return m, nil
 		case "2":
-			m.activeView = viewRuns
+			m.activeView = viewInstances
 			m.selectedRow = 0
 			m.tableScroll = 0
 			return m, nil
 		case "3":
-			m.activeView = viewPolicies
+			m.activeView = viewRuns
 			m.selectedRow = 0
 			m.tableScroll = 0
 			return m, nil
 		case "4":
-			m.activeView = viewSkills
+			m.activeView = viewPolicies
 			m.selectedRow = 0
 			m.tableScroll = 0
 			return m, nil
 		case "5":
-			m.activeView = viewChannels
+			m.activeView = viewSkills
 			m.selectedRow = 0
 			m.tableScroll = 0
-			m.drillInstance = ""
 			return m, nil
 		case "6":
-			m.activeView = viewPods
+			m.activeView = viewChannels
 			m.selectedRow = 0
 			m.tableScroll = 0
 			m.drillInstance = ""
@@ -2685,6 +2746,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeView = viewSchedules
 			m.selectedRow = 0
 			m.tableScroll = 0
+			return m, nil
+		case "8":
+			m.activeView = viewPods
+			m.selectedRow = 0
+			m.tableScroll = 0
+			m.drillInstance = ""
 			return m, nil
 		case "tab":
 			// Cycle forward through views.
@@ -2841,6 +2908,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.wizard.step = wizStepDone
 			m.input.Placeholder = "Press Enter to return"
+			return m, nil
+		}
+		if m.wizard.active && m.wizard.step == wizStepPersonaApplying {
+			if msg.err != nil {
+				m.wizard.step = wizStepPersonaDone
+				m.wizard.err = msg.err.Error()
+				m.wizard.resultMsgs = []string{tuiErrorStyle.Render("✗ " + msg.err.Error())}
+				m.input.Placeholder = "Press Enter to return"
+				return m, nil
+			}
+			// tuiPersonaApply already set resultMsgs and step on the wizardState.
+			// But the step mutation happened in the goroutine — re-apply here.
+			m.wizard.resultMsgs = strings.Split(msg.output, "\n")
+			m.wizard.step = wizStepPersonaDone
+			m.input.Placeholder = "Press Enter to switch to Instances"
 			return m, nil
 		}
 		if msg.err != nil {
@@ -3017,17 +3099,8 @@ func (m tuiModel) handleRowAction() (tea.Model, tea.Cmd) {
 	case viewPersonas:
 		if m.selectedRow < len(m.personaPacks) {
 			pp := m.personaPacks[m.selectedRow]
-			var personaNames []string
-			for _, p := range pp.Spec.Personas {
-				display := p.Name
-				if p.DisplayName != "" {
-					display = p.DisplayName
-				}
-				personaNames = append(personaNames, display)
-			}
-			m.addLog(fmt.Sprintf("%s │ %s │ personas: %s │ phase:%s installed:%d/%d",
-				pp.Name, pp.Spec.Category, strings.Join(personaNames, ", "),
-				pp.Status.Phase, pp.Status.InstalledCount, pp.Status.PersonaCount))
+			// Start the persona onboarding wizard with this pack pre-selected.
+			return m.startPersonaWizard(pp.Name)
 		}
 	}
 	return m, nil
@@ -3962,19 +4035,12 @@ func (m tuiModel) handleCommand(input string) (tea.Model, tea.Cmd) {
 
 	case "/persona":
 		if len(args) < 1 {
-			m.addLog(tuiErrorStyle.Render("Usage: /persona install <pack-name>"))
+			m.addLog(tuiErrorStyle.Render("Usage: /persona delete <pack-name>"))
+			m.addLog(tuiDimStyle.Render("  Tip: go to the Personas tab and press Enter on a pack to onboard."))
 			return m, nil
 		}
 		subCmd := strings.ToLower(args[0])
 		switch subCmd {
-		case "install":
-			if len(args) < 2 {
-				m.addLog(tuiErrorStyle.Render("Usage: /persona install <pack-name>"))
-				return m, nil
-			}
-			packName := args[1]
-			ns := m.namespace
-			return m, m.asyncCmd(func() (string, error) { return tuiInstallPersonaPack(ns, packName) })
 		case "delete":
 			if len(args) < 2 {
 				m.addLog(tuiErrorStyle.Render("Usage: /persona delete <pack-name>"))
@@ -3984,7 +4050,8 @@ func (m tuiModel) handleCommand(input string) (tea.Model, tea.Cmd) {
 			ns := m.namespace
 			return m, m.asyncCmd(func() (string, error) { return tuiDeletePersonaPack(ns, packName) })
 		default:
-			m.addLog(tuiErrorStyle.Render("Unknown sub-command. Usage: /persona install|delete <pack-name>"))
+			m.addLog(tuiErrorStyle.Render("Unknown sub-command. Usage: /persona delete <pack-name>"))
+			m.addLog(tuiDimStyle.Render("  Tip: go to the Personas tab and press Enter on a pack to onboard."))
 		}
 		return m, nil
 
@@ -4116,6 +4183,34 @@ func (m tuiModel) startOnboardWizard() (tea.Model, tea.Cmd) {
 	m.input.Placeholder = ""
 	m.suggestions = nil
 	return m.advanceWizard("")
+}
+
+func (m tuiModel) startPersonaWizard(packName string) (tea.Model, tea.Cmd) {
+	if !m.connected {
+		m.addLog(tuiErrorStyle.Render("✗ Not connected to cluster"))
+		return m, nil
+	}
+	m.wizard.reset()
+	m.wizard.active = true
+	m.wizard.personaMode = true
+	m.wizard.personaPackName = packName
+	// Pre-populate channels toggle list.
+	m.wizard.personaChannels = make([]personaChannelChoice, len(defaultPersonaChannels))
+	copy(m.wizard.personaChannels, defaultPersonaChannels)
+	m.inputFocused = true
+	m.input.Focus()
+	m.input.SetValue("")
+	m.input.Placeholder = ""
+	m.suggestions = nil
+
+	if packName == "" {
+		// No pack specified — start at pack selection.
+		m.wizard.step = wizStepPersonaPick
+		return m, nil
+	}
+	// Pack specified — verify it exists and jump to provider.
+	m.wizard.step = wizStepPersonaPick
+	return m.advanceWizard(packName)
 }
 
 // ── View ─────────────────────────────────────────────────────────────────────
@@ -4772,12 +4867,12 @@ func (m tuiModel) renderSchedulesTable(tableH int) string {
 func (m tuiModel) renderPersonasTable(tableH int) string {
 	var b strings.Builder
 
-	header := fmt.Sprintf(" %-24s %-14s %-10s %-10s %-12s %-8s", "NAME", "CATEGORY", "PERSONAS", "INSTALLED", "PHASE", "AGE")
+	header := fmt.Sprintf(" %-24s %-14s %-10s %-10s %-12s %-8s", "NAME", "CATEGORY", "AGENTS", "INSTALLED", "PHASE", "AGE")
 	b.WriteString(tuiColHeaderStyle.Render(padRight(header, m.width)))
 	b.WriteString("\n")
 
 	if len(m.personaPacks) == 0 {
-		b.WriteString(m.renderEmptyTable(tableH-1, "No PersonaPacks found — apply one from config/personas/"))
+		b.WriteString(m.renderEmptyTable(tableH-1, "No PersonaPacks found — run 'sympozium install' to add built-in packs"))
 		return b.String()
 	}
 
@@ -4798,8 +4893,9 @@ func (m tuiModel) renderPersonasTable(tableH int) string {
 			cat = "-"
 		}
 
+		agentCount := len(pp.Spec.Personas)
 		row := fmt.Sprintf(" %-24s %-14s %-10d %-10d %-12s %-8s",
-			truncate(pp.Name, 24), truncate(cat, 14), pp.Status.PersonaCount, pp.Status.InstalledCount, phase, age)
+			truncate(pp.Name, 24), truncate(cat, 14), agentCount, pp.Status.InstalledCount, phase, age)
 
 		if idx == m.selectedRow {
 			b.WriteString(tuiRowSelectedStyle.Render(padRight(row, m.width)))
@@ -4812,6 +4908,11 @@ func (m tuiModel) renderPersonasTable(tableH int) string {
 		}
 		b.WriteString("\n")
 	}
+
+	// Hint line below the table.
+	hint := tuiDimStyle.Render(" Press Enter on a pack to onboard and create agents")
+	b.WriteString(padRight(hint, m.width) + "\n")
+
 	return b.String()
 }
 
@@ -5521,7 +5622,7 @@ func (m tuiModel) renderStatusBar() string {
 	} else {
 		keys = []string{
 			"Tab", "next view",
-			"1-7", "views",
+			"1-8", "views",
 			"Enter", "detail",
 			"Esc", "back",
 			"f", "detail pane",
@@ -6608,8 +6709,235 @@ func (m tuiModel) advanceWizard(val string) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		m.input.Placeholder = "Type / for commands or press ? for help..."
 		return m, refreshDataCmd()
+
+	// ── Persona Wizard Steps ─────────────────────────────────────────────
+	case wizStepPersonaPick:
+		if val == "" {
+			// No selection yet — show available packs.
+			m.input.Placeholder = "Pack name or number"
+			return m, nil
+		}
+		// Resolve number to name.
+		if idx, err := strconv.Atoi(val); err == nil {
+			packs := m.personaPacks
+			if idx >= 1 && idx <= len(packs) {
+				val = packs[idx-1].Name
+			}
+		}
+		// Verify pack exists in cluster.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		var pack sympoziumv1alpha1.PersonaPack
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: val, Namespace: m.namespace}, &pack); err != nil {
+			w.err = fmt.Sprintf("PersonaPack %q not found in cluster. Have you run 'sympozium install'?", val)
+			return m, nil
+		}
+		w.err = ""
+		w.personaPackName = val
+
+		// Check if already activated (has authRefs set).
+		if len(pack.Spec.AuthRefs) > 0 && pack.Status.Phase == "Ready" {
+			w.err = fmt.Sprintf("PersonaPack %q is already activated (%d/%d personas installed)",
+				val, pack.Status.InstalledCount, pack.Status.PersonaCount)
+			w.active = false
+			m.inputFocused = false
+			m.input.Blur()
+			m.input.Placeholder = "Type / for commands or press ? for help..."
+			m.addLog(tuiErrorStyle.Render("✗ " + w.err))
+			return m, nil
+		}
+
+		w.step = wizStepPersonaProvider
+		m.input.Placeholder = "Choice [1-6] (default: 1 — OpenAI)"
+		return m, nil
+
+	case wizStepPersonaProvider:
+		if val == "" {
+			val = "1"
+		}
+		w.providerChoice = val
+		switch val {
+		case "2":
+			w.providerName = "anthropic"
+			w.secretEnvKey = "ANTHROPIC_API_KEY"
+			w.step = wizStepPersonaAPIKey
+			m.input.Placeholder = fmt.Sprintf("%s (paste key, Enter to skip)", w.secretEnvKey)
+			return m, nil
+		case "3":
+			w.providerName = "azure-openai"
+			w.secretEnvKey = "AZURE_OPENAI_API_KEY"
+			w.step = wizStepPersonaBaseURL
+			m.input.Placeholder = "Azure OpenAI endpoint URL"
+			return m, nil
+		case "4":
+			w.providerName = "ollama"
+			w.secretEnvKey = ""
+			w.step = wizStepPersonaBaseURL
+			m.input.Placeholder = "Ollama URL (default: http://ollama.default.svc:11434/v1)"
+			return m, nil
+		case "5":
+			w.providerName = "custom"
+			w.secretEnvKey = "API_KEY"
+			w.step = wizStepPersonaBaseURL
+			m.input.Placeholder = "API base URL"
+			return m, nil
+		default:
+			w.providerName = "openai"
+			w.secretEnvKey = "OPENAI_API_KEY"
+			w.step = wizStepPersonaAPIKey
+			m.input.Placeholder = fmt.Sprintf("%s (paste key, Enter to skip)", w.secretEnvKey)
+			return m, nil
+		}
+
+	case wizStepPersonaBaseURL:
+		if val == "" && w.providerName == "ollama" {
+			val = "http://ollama.default.svc:11434/v1"
+		}
+		w.baseURL = val
+		if w.secretEnvKey == "" {
+			// Ollama — no key needed, skip to model.
+			w.step = wizStepPersonaModel
+			m.input.Placeholder = "Model name (default: llama3)"
+			return m, nil
+		}
+		w.step = wizStepPersonaAPIKey
+		m.input.Placeholder = fmt.Sprintf("%s (paste key, Enter to skip)", w.secretEnvKey)
+		return m, nil
+
+	case wizStepPersonaAPIKey:
+		w.apiKey = val
+		if w.apiKey == "" && w.secretEnvKey != "" {
+			w.apiKey = os.Getenv(w.secretEnvKey)
+		}
+		// Try to fetch models.
+		w.fetchedModels = nil
+		w.modelFetchErr = ""
+		if w.apiKey != "" {
+			models, err := fetchProviderModels(w.providerName, w.apiKey, w.baseURL)
+			if err != nil {
+				w.modelFetchErr = err.Error()
+			} else {
+				filtered := filterChatModels(models)
+				if len(filtered) > 0 {
+					w.fetchedModels = filtered
+				} else {
+					w.fetchedModels = models
+				}
+			}
+		}
+		w.step = wizStepPersonaModel
+		if len(w.fetchedModels) > 0 {
+			m.input.Placeholder = "Choose a model [number] or type a name"
+		} else {
+			switch w.providerName {
+			case "anthropic":
+				m.input.Placeholder = "Model name (default: claude-sonnet-4-20250514)"
+			case "azure-openai":
+				m.input.Placeholder = "Deployment name (default: gpt-4o)"
+			default:
+				m.input.Placeholder = "Model name (default: gpt-4o)"
+			}
+		}
+		return m, nil
+
+	case wizStepPersonaModel:
+		if val == "" {
+			switch w.providerName {
+			case "anthropic":
+				val = "claude-sonnet-4-20250514"
+			case "ollama":
+				val = "llama3"
+			default:
+				val = "gpt-4o"
+			}
+		} else if len(w.fetchedModels) > 0 {
+			if idx, err := strconv.Atoi(val); err == nil && idx >= 1 && idx <= len(w.fetchedModels) {
+				val = w.fetchedModels[idx-1]
+			}
+		} else {
+			if suggestions, ok := modelSuggestions[w.providerName]; ok {
+				if idx, err := strconv.Atoi(val); err == nil && idx >= 1 && idx <= len(suggestions) {
+					val = suggestions[idx-1].text
+				}
+			}
+		}
+		w.modelName = val
+		w.step = wizStepPersonaChannels
+		m.input.Placeholder = "Toggle channels with number, Enter when done"
+		return m, nil
+
+	case wizStepPersonaChannels:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			// Done selecting channels — collect tokens for enabled channels.
+			w.personaChannelIdx = 0
+			return m.advancePersonaChannelToken()
+		}
+		// Toggle a channel by number.
+		if idx, err := strconv.Atoi(val); err == nil && idx >= 1 && idx <= len(w.personaChannels) {
+			w.personaChannels[idx-1].enabled = !w.personaChannels[idx-1].enabled
+		}
+		m.input.SetValue("")
+		m.input.Placeholder = "Toggle channels with number, Enter when done"
+		return m, nil
+
+	case wizStepPersonaChannelToken:
+		// Store token for current channel.
+		if w.personaChannelIdx < len(w.personaChannels) {
+			w.personaChannels[w.personaChannelIdx].token = val
+		}
+		w.personaChannelIdx++
+		return m.advancePersonaChannelToken()
+
+	case wizStepPersonaConfirm:
+		v := strings.ToLower(val)
+		if v == "n" || v == "no" {
+			w.reset()
+			m.inputFocused = false
+			m.input.Blur()
+			m.input.Placeholder = "Type / for commands or press ? for help..."
+			m.addLog(tuiDimStyle.Render("Persona wizard cancelled"))
+			return m, nil
+		}
+		w.step = wizStepPersonaApplying
+		ns := m.namespace
+		return m, m.asyncCmd(func() (string, error) {
+			return tuiPersonaApply(ns, w)
+		})
+
+	case wizStepPersonaDone:
+		w.reset()
+		m.inputFocused = false
+		m.input.Blur()
+		m.input.Placeholder = "Type / for commands or press ? for help..."
+		// Switch to Instances view so user sees the newly created agents.
+		m.activeView = viewInstances
+		m.selectedRow = 0
+		m.tableScroll = 0
+		return m, refreshDataCmd()
 	}
 
+	return m, nil
+}
+
+// advancePersonaChannelToken skips to the next enabled channel that needs
+// a token, or advances to confirm once all tokens are collected.
+func (m tuiModel) advancePersonaChannelToken() (tea.Model, tea.Cmd) {
+	w := &m.wizard
+	for w.personaChannelIdx < len(w.personaChannels) {
+		ch := w.personaChannels[w.personaChannelIdx]
+		if ch.enabled && ch.tokenKey != "" {
+			// This channel needs a token.
+			w.step = wizStepPersonaChannelToken
+			m.input.SetValue("")
+			m.input.Placeholder = fmt.Sprintf("%s token (%s)", ch.chType, ch.tokenKey)
+			return m, nil
+		}
+		w.personaChannelIdx++
+	}
+	// All tokens collected — proceed to confirm.
+	w.step = wizStepPersonaConfirm
+	m.input.Placeholder = "Proceed? [Y/n]"
 	return m, nil
 }
 
@@ -6624,6 +6952,11 @@ func (m tuiModel) renderWizardPanel(h int) string {
 	menuNumStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F5C2E7")).Bold(true)
 	hintStyle := tuiDimStyle
 	stepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FAB387")).Bold(true)
+
+	// Persona wizard has its own renderer.
+	if w.personaMode {
+		return m.renderPersonaWizardPanel(h, titleStyle, labelStyle, valueStyle, menuStyle, menuNumStyle, hintStyle, stepStyle)
+	}
 
 	var lines []string
 	lines = append(lines, "")
@@ -6914,6 +7247,293 @@ func (m tuiModel) renderWizardPanel(h int) string {
 	}
 
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// renderPersonaWizardPanel renders the persona onboarding wizard overlay.
+func (m tuiModel) renderPersonaWizardPanel(h int,
+	titleStyle, labelStyle, valueStyle, menuStyle, menuNumStyle, hintStyle, stepStyle lipgloss.Style,
+) string {
+	w := &m.wizard
+	var lines []string
+
+	lines = append(lines, "")
+	lines = append(lines, titleStyle.Render("  ╔═══════════════════════════════════════════╗"))
+	lines = append(lines, titleStyle.Render("  ║       Sympozium · Persona Pack Wizard       ║"))
+	lines = append(lines, titleStyle.Render("  ╚═══════════════════════════════════════════╝"))
+	lines = append(lines, "")
+
+	// Recap completed values.
+	if w.personaPackName != "" && w.step > wizStepPersonaPick {
+		// Show pack info.
+		lines = append(lines, hintStyle.Render("  Pack: ")+valueStyle.Render(w.personaPackName))
+		for _, pp := range m.personaPacks {
+			if pp.Name == w.personaPackName {
+				lines = append(lines, hintStyle.Render("  Category: ")+valueStyle.Render(pp.Spec.Category)+
+					hintStyle.Render("  Personas: ")+valueStyle.Render(fmt.Sprintf("%d", len(pp.Spec.Personas))))
+				for _, p := range pp.Spec.Personas {
+					name := p.Name
+					if p.DisplayName != "" {
+						name = p.DisplayName
+					}
+					sched := "(on-demand)"
+					if p.Schedule != nil {
+						if p.Schedule.Interval != "" {
+							sched = "every " + p.Schedule.Interval
+						} else if p.Schedule.Cron != "" {
+							sched = p.Schedule.Cron
+						}
+					}
+					lines = append(lines, hintStyle.Render("    • ")+valueStyle.Render(name)+hintStyle.Render(" — "+sched))
+				}
+				break
+			}
+		}
+		lines = append(lines, "")
+	}
+
+	if w.providerName != "" && w.step > wizStepPersonaProvider {
+		provLine := hintStyle.Render("  Provider: ") + valueStyle.Render(w.providerName)
+		if w.modelName != "" {
+			provLine += hintStyle.Render("  Model: ") + valueStyle.Render(w.modelName)
+		}
+		lines = append(lines, provLine)
+	}
+	if w.apiKey != "" && w.step > wizStepPersonaAPIKey {
+		lines = append(lines, hintStyle.Render("  API Key: ")+valueStyle.Render("••••"+w.apiKey[max(0, len(w.apiKey)-4):]))
+	}
+
+	// Current step.
+	switch w.step {
+	case wizStepPersonaPick:
+		stepNum := 1
+		lines = append(lines, stepStyle.Render(fmt.Sprintf("  Step %d: Select a PersonaPack", stepNum)))
+		lines = append(lines, "")
+		if len(m.personaPacks) == 0 {
+			lines = append(lines, hintStyle.Render("  No PersonaPacks found in cluster."))
+			lines = append(lines, hintStyle.Render("  Run 'sympozium install' to install built-in packs."))
+		} else {
+			for i, pp := range m.personaPacks {
+				activated := ""
+				if len(pp.Spec.AuthRefs) > 0 && pp.Status.Phase == "Ready" {
+					activated = " ✓ activated"
+				}
+				lines = append(lines, menuNumStyle.Render(fmt.Sprintf("  [%d]", i+1))+
+					menuStyle.Render(fmt.Sprintf(" %s", pp.Name))+
+					hintStyle.Render(fmt.Sprintf(" — %s (%d personas)%s",
+						pp.Spec.Category, len(pp.Spec.Personas), activated)))
+			}
+		}
+		lines = append(lines, "")
+
+	case wizStepPersonaProvider:
+		lines = append(lines, stepStyle.Render("  Step 2: Select AI Provider"))
+		lines = append(lines, "")
+		lines = append(lines, menuNumStyle.Render("  [1]")+menuStyle.Render(" OpenAI")+hintStyle.Render(" — GPT-4o, o1, etc."))
+		lines = append(lines, menuNumStyle.Render("  [2]")+menuStyle.Render(" Anthropic")+hintStyle.Render(" — Claude Sonnet/Opus"))
+		lines = append(lines, menuNumStyle.Render("  [3]")+menuStyle.Render(" Azure OpenAI")+hintStyle.Render(" — Enterprise Azure"))
+		lines = append(lines, menuNumStyle.Render("  [4]")+menuStyle.Render(" Ollama")+hintStyle.Render(" — Local models"))
+		lines = append(lines, menuNumStyle.Render("  [5]")+menuStyle.Render(" Custom")+hintStyle.Render(" — Any OpenAI-compatible API"))
+		lines = append(lines, "")
+
+	case wizStepPersonaBaseURL:
+		lines = append(lines, stepStyle.Render("  Step 3: API Base URL"))
+		lines = append(lines, "")
+
+	case wizStepPersonaAPIKey:
+		lines = append(lines, stepStyle.Render("  Step 3: API Key"))
+		lines = append(lines, "")
+		lines = append(lines, hintStyle.Render(fmt.Sprintf("  Paste your %s or press Enter to read from env.", w.secretEnvKey)))
+		lines = append(lines, "")
+
+	case wizStepPersonaModel:
+		lines = append(lines, stepStyle.Render("  Step 4: Model"))
+		lines = append(lines, "")
+		lines = append(lines, hintStyle.Render("  All personas in the pack will use this model."))
+		lines = append(lines, "")
+		if len(w.fetchedModels) > 0 {
+			lines = append(lines, labelStyle.Render("  Available models:"))
+			for i, model := range w.fetchedModels {
+				lines = append(lines, menuNumStyle.Render(fmt.Sprintf("  [%d]", i+1))+menuStyle.Render(" "+model))
+			}
+			lines = append(lines, "")
+		} else if suggestions, ok := modelSuggestions[w.providerName]; ok {
+			lines = append(lines, labelStyle.Render("  Suggested models:"))
+			for i, s := range suggestions {
+				lines = append(lines, menuNumStyle.Render(fmt.Sprintf("  [%d]", i+1))+menuStyle.Render(" "+s.text)+hintStyle.Render(" — "+s.desc))
+			}
+			lines = append(lines, "")
+		}
+
+	case wizStepPersonaChannels:
+		lines = append(lines, stepStyle.Render("  Step 5: Channel Bindings"))
+		lines = append(lines, "")
+		lines = append(lines, hintStyle.Render("  Toggle channels to bind to all personas in this pack."))
+		lines = append(lines, hintStyle.Render("  Type a number to toggle, press Enter when done."))
+		lines = append(lines, "")
+		for i, ch := range w.personaChannels {
+			tog := "○"
+			if ch.enabled {
+				tog = "●"
+			}
+			lines = append(lines, menuNumStyle.Render(fmt.Sprintf("  [%d]", i+1))+
+				menuStyle.Render(fmt.Sprintf(" %s %s", tog, ch.chType)))
+		}
+		lines = append(lines, "")
+
+	case wizStepPersonaChannelToken:
+		if w.personaChannelIdx < len(w.personaChannels) {
+			ch := w.personaChannels[w.personaChannelIdx]
+			lines = append(lines, stepStyle.Render(fmt.Sprintf("  Step 5b: %s Token", strings.Title(ch.chType))))
+			lines = append(lines, "")
+			lines = append(lines, hintStyle.Render(fmt.Sprintf("  Paste %s or press Enter to skip.", ch.tokenKey)))
+		}
+		lines = append(lines, "")
+
+	case wizStepPersonaConfirm:
+		lines = append(lines, stepStyle.Render("  Step 6: Confirm"))
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("  Summary:"))
+		lines = append(lines, hintStyle.Render("  Pack:     ")+valueStyle.Render(w.personaPackName))
+		lines = append(lines, hintStyle.Render("  Provider: ")+valueStyle.Render(w.providerName))
+		lines = append(lines, hintStyle.Render("  Model:    ")+valueStyle.Render(w.modelName))
+		var chNames []string
+		for _, ch := range w.personaChannels {
+			if ch.enabled {
+				chNames = append(chNames, ch.chType)
+			}
+		}
+		if len(chNames) > 0 {
+			lines = append(lines, hintStyle.Render("  Channels: ")+valueStyle.Render(strings.Join(chNames, ", ")))
+		} else {
+			lines = append(lines, hintStyle.Render("  Channels: ")+valueStyle.Render("none"))
+		}
+		lines = append(lines, "")
+		lines = append(lines, hintStyle.Render("  This will create an auth secret and activate the pack."))
+		lines = append(lines, hintStyle.Render("  The controller will stamp out one instance per persona."))
+		lines = append(lines, "")
+
+	case wizStepPersonaApplying:
+		lines = append(lines, labelStyle.Render("  Activating persona pack..."))
+
+	case wizStepPersonaDone:
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("  ✅ Persona pack activated!"))
+		lines = append(lines, "")
+		if len(w.resultMsgs) > 0 {
+			for _, msg := range w.resultMsgs {
+				lines = append(lines, "  "+msg)
+			}
+		}
+		lines = append(lines, "")
+		lines = append(lines, hintStyle.Render("  Press Enter to switch to Instances view."))
+	}
+
+	if w.err != "" {
+		lines = append(lines, "")
+		lines = append(lines, tuiErrorStyle.Render("  ✗ "+w.err))
+	}
+
+	// Scroll + pad to fill available height.
+	if len(lines) > h {
+		maxOffset := len(lines) - h
+		if w.scrollOffset > maxOffset {
+			w.scrollOffset = maxOffset
+		}
+		lines = lines[w.scrollOffset:]
+	}
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// tuiPersonaApply activates a PersonaPack by creating the auth secret,
+// patching the pack with authRefs + channel config, and letting the
+// controller reconciler stamp out instances.
+func tuiPersonaApply(ns string, w *wizardState) (string, error) {
+	ctx := context.Background()
+	var msgs []string
+
+	secretName := fmt.Sprintf("%s-%s-key", w.personaPackName, w.providerName)
+
+	// 1. Create AI provider secret.
+	if w.apiKey != "" {
+		existing := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: ns}, existing); err == nil {
+			_ = k8sClient.Delete(ctx, existing)
+		}
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: ns},
+			StringData: map[string]string{w.secretEnvKey: w.apiKey},
+		}
+		if err := k8sClient.Create(ctx, secret); err != nil {
+			return "", fmt.Errorf("create provider secret: %w", err)
+		}
+		msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Created secret: %s", secretName)))
+	} else if w.secretEnvKey != "" {
+		msgs = append(msgs, tuiDimStyle.Render(fmt.Sprintf("⚠ No API key — create secret later: kubectl create secret generic %s --from-literal=%s=<key>",
+			secretName, w.secretEnvKey)))
+	}
+
+	// 2. Create channel secrets for enabled channels.
+	for i := range w.personaChannels {
+		ch := &w.personaChannels[i]
+		if !ch.enabled || ch.token == "" {
+			continue
+		}
+		chSecretName := fmt.Sprintf("%s-%s-secret", w.personaPackName, ch.chType)
+		existing := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: chSecretName, Namespace: ns}, existing); err == nil {
+			_ = k8sClient.Delete(ctx, existing)
+		}
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: chSecretName, Namespace: ns},
+			StringData: map[string]string{ch.tokenKey: ch.token},
+		}
+		if err := k8sClient.Create(ctx, secret); err != nil {
+			return "", fmt.Errorf("create channel secret: %w", err)
+		}
+		msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Created secret: %s", chSecretName)))
+	}
+
+	// 3. Patch the PersonaPack with authRefs and channel config.
+	var pack sympoziumv1alpha1.PersonaPack
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: w.personaPackName, Namespace: ns}, &pack); err != nil {
+		return "", fmt.Errorf("get PersonaPack: %w", err)
+	}
+
+	pack.Spec.AuthRefs = []sympoziumv1alpha1.SecretRef{
+		{
+			Provider: w.providerName,
+			Secret:   secretName,
+		},
+	}
+
+	// Update each persona with the chosen model and channel bindings.
+	var enabledChannels []string
+	for _, ch := range w.personaChannels {
+		if ch.enabled {
+			enabledChannels = append(enabledChannels, ch.chType)
+		}
+	}
+	for i := range pack.Spec.Personas {
+		pack.Spec.Personas[i].Model = w.modelName
+		if len(enabledChannels) > 0 {
+			pack.Spec.Personas[i].Channels = enabledChannels
+		}
+	}
+
+	if err := k8sClient.Update(ctx, &pack); err != nil {
+		return "", fmt.Errorf("update PersonaPack: %w", err)
+	}
+	msgs = append(msgs, tuiSuccessStyle.Render(fmt.Sprintf("✓ Activated PersonaPack: %s (%d personas)", w.personaPackName, len(pack.Spec.Personas))))
+	msgs = append(msgs, tuiDimStyle.Render("  Controller will create instances shortly..."))
+
+	return strings.Join(msgs, "\n"), nil
 }
 
 // tuiOnboardApply creates all K8s resources for the onboard wizard.

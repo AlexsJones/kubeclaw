@@ -60,8 +60,9 @@ func (r *SympoziumInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			if err := r.cleanupMemoryConfigMap(ctx, &instance); err != nil {
 				log.Error(err, "failed to cleanup memory ConfigMap")
 			}
+			patch := client.MergeFrom(instance.DeepCopy())
 			controllerutil.RemoveFinalizer(&instance, sympoziumInstanceFinalizer)
-			if err := r.Update(ctx, &instance); err != nil {
+			if err := r.Patch(ctx, &instance, patch); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -70,8 +71,13 @@ func (r *SympoziumInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Add finalizer if missing
 	if !controllerutil.ContainsFinalizer(&instance, sympoziumInstanceFinalizer) {
+		patch := client.MergeFrom(instance.DeepCopy())
 		controllerutil.AddFinalizer(&instance, sympoziumInstanceFinalizer)
-		if err := r.Update(ctx, &instance); err != nil {
+		if err := r.Patch(ctx, &instance, patch); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Re-fetch so subsequent operations use the latest resourceVersion.
+		if err := r.Get(ctx, req.NamespacedName, &instance); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -79,8 +85,9 @@ func (r *SympoziumInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Reconcile channel deployments
 	if err := r.reconcileChannels(ctx, &instance); err != nil {
 		log.Error(err, "failed to reconcile channels")
+		statusBase := instance.DeepCopy()
 		instance.Status.Phase = "Error"
-		_ = r.Status().Update(ctx, &instance)
+		_ = r.Status().Patch(ctx, &instance, client.MergeFrom(statusBase))
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 	}
 
@@ -96,9 +103,10 @@ func (r *SympoziumInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Update status
+	statusBase := instance.DeepCopy()
 	instance.Status.Phase = "Running"
 	instance.Status.ActiveAgentPods = activeCount
-	if err := r.Status().Update(ctx, &instance); err != nil {
+	if err := r.Status().Patch(ctx, &instance, client.MergeFrom(statusBase)); err != nil {
 		return ctrl.Result{}, err
 	}
 
