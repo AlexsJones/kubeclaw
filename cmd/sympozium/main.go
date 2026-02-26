@@ -1894,8 +1894,10 @@ type tuiModel struct {
 	editHeartbeat    editHeartbeatForm
 	editTaskInput    bool            // sub-modal for task text entry
 	editTaskTI       textinput.Model // text input for task sub-modal
-	editSkills       []editSkillItem // toggleable skills list
-	editChannels     []editChannelItem // channel bindings
+	editSkills          []editSkillItem   // toggleable skills list
+	editChannels        []editChannelItem // channel bindings
+	editPersonaPackName string             // non-empty when editing a PersonaPack
+	editPersonas        []editPersonaItem  // toggleable personas list
 
 	// Detail pane
 	detailPane       detailPaneState // collapsed, panel, or fullscreen
@@ -1933,6 +1935,13 @@ type editChannelItem struct {
 	chType    string // telegram, slack, discord, whatsapp
 	enabled   bool   // whether channel is bound to the instance
 	secretRef string // secret name for credentials
+}
+
+// editPersonaItem represents a toggleable persona in the PersonaPack edit modal.
+type editPersonaItem struct {
+	name        string // persona name within the pack
+	displayName string // human-readable name
+	enabled     bool   // true = active, false = excluded
 }
 
 var editScheduleTypes = []string{"heartbeat", "scheduled", "sweep"}
@@ -2292,19 +2301,28 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc":
 				m.showEditModal = false
+				m.editPersonaPackName = ""
 				m.addLog(tuiDimStyle.Render("Edit cancelled"))
 				return m, nil
 			case "tab":
+				if m.editPersonaPackName != "" {
+					return m, nil // no tabs in persona pack mode
+				}
 				m.editTab = (m.editTab + 1) % len(editTabNames)
 				m.editField = 0
 				return m, nil
 			case "shift+tab":
+				if m.editPersonaPackName != "" {
+					return m, nil // no tabs in persona pack mode
+				}
 				m.editTab = (m.editTab + len(editTabNames) - 1) % len(editTabNames)
 				m.editField = 0
 				return m, nil
 			case "j", "down":
 				max := editMemoryFieldCount
-				if m.editTab == 1 {
+				if m.editPersonaPackName != "" {
+					max = len(m.editPersonas)
+				} else if m.editTab == 1 {
 					max = editHeartbeatFieldCount
 				} else if m.editTab == 2 {
 					max = len(m.editSkills)
@@ -2322,7 +2340,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case " ":
 				// Toggle boolean fields
-				if m.editTab == 0 {
+				if m.editPersonaPackName != "" {
+					if m.editField >= 0 && m.editField < len(m.editPersonas) {
+						m.editPersonas[m.editField].enabled = !m.editPersonas[m.editField].enabled
+					}
+				} else if m.editTab == 0 {
 					if m.editField == 0 {
 						m.editMemory.enabled = !m.editMemory.enabled
 					}
@@ -2389,7 +2411,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "enter":
 				// Toggle bools, open task sub-modal, or no-op on text fields.
-				if m.editTab == 0 {
+				if m.editPersonaPackName != "" {
+					if m.editField >= 0 && m.editField < len(m.editPersonas) {
+						m.editPersonas[m.editField].enabled = !m.editPersonas[m.editField].enabled
+					}
+				} else if m.editTab == 0 {
 					if m.editField == 0 {
 						m.editMemory.enabled = !m.editMemory.enabled
 					}
@@ -2422,6 +2448,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+s":
 				// Apply changes
 				m.showEditModal = false
+				editPackName := m.editPersonaPackName
+				m.editPersonaPackName = ""
+				if editPackName != "" {
+					return m, m.applyPersonaPackEdit(editPackName)
+				}
 				return m, m.applyEditModal()
 			default:
 				// Type into text fields
@@ -2768,6 +2799,32 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "shift+tab":
 			// Cycle backward through views.
+			prev := int(m.activeView) - 1
+			if prev < 0 {
+				prev = len(viewNames) - 1
+			}
+			m.activeView = tuiViewKind(prev)
+			m.selectedRow = 0
+			m.tableScroll = 0
+			if m.activeView != viewChannels && m.activeView != viewPods {
+				m.drillInstance = ""
+			}
+			return m, nil
+		case "right":
+			// Cycle forward through views (arrow key).
+			next := int(m.activeView) + 1
+			if next >= len(viewNames) {
+				next = 0
+			}
+			m.activeView = tuiViewKind(next)
+			m.selectedRow = 0
+			m.tableScroll = 0
+			if m.activeView != viewChannels && m.activeView != viewPods {
+				m.drillInstance = ""
+			}
+			return m, nil
+		case "left":
+			// Cycle backward through views (arrow key).
 			prev := int(m.activeView) - 1
 			if prev < 0 {
 				prev = len(viewNames) - 1
@@ -3238,12 +3295,25 @@ func (m tuiModel) handleRowDelete() (tea.Model, tea.Cmd) {
 	switch m.activeView {
 	case viewInstances:
 		if m.selectedRow < len(m.instances) {
-			name := m.instances[m.selectedRow].Name
-			m.confirmDelete = true
-			m.deleteResourceKind = "instance"
-			m.deleteResourceName = name
+			inst := m.instances[m.selectedRow]
+			name := inst.Name
 			ns := m.namespace
-			m.deleteFunc = func() (string, error) { return tuiDelete(ns, "instance", name) }
+			// Check if this instance belongs to a PersonaPack.
+			packName := inst.Labels["sympozium.ai/persona-pack"]
+			personaName := inst.Labels["sympozium.ai/persona"]
+			if packName != "" && personaName != "" {
+				m.confirmDelete = true
+				m.deleteResourceKind = "persona in pack " + packName
+				m.deleteResourceName = personaName
+				m.deleteFunc = func() (string, error) {
+					return tuiDisablePackPersona(ns, packName, personaName)
+				}
+			} else {
+				m.confirmDelete = true
+				m.deleteResourceKind = "instance"
+				m.deleteResourceName = name
+				m.deleteFunc = func() (string, error) { return tuiDelete(ns, "instance", name) }
+			}
 		}
 	case viewRuns:
 		if m.selectedRow < len(m.runs) {
@@ -3296,12 +3366,20 @@ func (m tuiModel) handleRowDelete() (tea.Model, tea.Cmd) {
 		}
 	case viewPersonas:
 		if m.selectedRow < len(m.personaPacks) {
-			name := m.personaPacks[m.selectedRow].Name
-			m.confirmDelete = true
-			m.deleteResourceKind = "persona pack"
-			m.deleteResourceName = name
+			pack := m.personaPacks[m.selectedRow]
+			name := pack.Name
 			ns := m.namespace
-			m.deleteFunc = func() (string, error) { return tuiDelete(ns, "persona", name) }
+			// Collect all persona names to disable.
+			var allNames []string
+			for _, p := range pack.Spec.Personas {
+				allNames = append(allNames, p.Name)
+			}
+			m.confirmDelete = true
+			m.deleteResourceKind = "all personas in pack"
+			m.deleteResourceName = name
+			m.deleteFunc = func() (string, error) {
+				return tuiDisableAllPackPersonas(ns, name, allNames)
+			}
 		}
 	}
 	return m, nil
@@ -3460,6 +3538,35 @@ func (m tuiModel) handleRowEdit() (tea.Model, tea.Cmd) {
 			}
 		}
 		m.showEditModal = true
+	case viewPersonas:
+		if m.selectedRow >= len(m.personaPacks) {
+			return m, nil
+		}
+		pp := m.personaPacks[m.selectedRow]
+		m.editPersonaPackName = pp.Name
+		m.editInstanceName = ""
+		m.editScheduleName = ""
+		m.editTab = 0
+		m.editField = 0
+
+		// Build persona toggle list from the pack spec.
+		excluded := make(map[string]bool)
+		for _, e := range pp.Spec.ExcludePersonas {
+			excluded[e] = true
+		}
+		m.editPersonas = nil
+		for _, p := range pp.Spec.Personas {
+			dn := p.DisplayName
+			if dn == "" {
+				dn = p.Name
+			}
+			m.editPersonas = append(m.editPersonas, editPersonaItem{
+				name:        p.Name,
+				displayName: dn,
+				enabled:     !excluded[p.Name],
+			})
+		}
+		m.showEditModal = true
 	default:
 		m.addLog(tuiDimStyle.Render("Edit not available for this view"))
 	}
@@ -3590,6 +3697,43 @@ func (m tuiModel) applyEditModal() tea.Cmd {
 		}
 
 		result := tuiSuccessStyle.Render("✓ " + strings.Join(msgs, ", "))
+		return cmdResultMsg{output: result}
+	}
+}
+
+// applyPersonaPackEdit saves the persona enable/disable toggles back to the PersonaPack.
+func (m tuiModel) applyPersonaPackEdit(packName string) tea.Cmd {
+	ns := m.namespace
+	personas := make([]editPersonaItem, len(m.editPersonas))
+	copy(personas, m.editPersonas)
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		var pack sympoziumv1alpha1.PersonaPack
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: packName, Namespace: ns}, &pack); err != nil {
+			return cmdResultMsg{err: fmt.Errorf("get PersonaPack %q: %w", packName, err)}
+		}
+
+		// Build new ExcludePersonas list from disabled toggles.
+		var excludes []string
+		for _, p := range personas {
+			if !p.enabled {
+				excludes = append(excludes, p.name)
+			}
+		}
+		pack.Spec.ExcludePersonas = excludes
+
+		if err := k8sClient.Update(ctx, &pack); err != nil {
+			return cmdResultMsg{err: fmt.Errorf("update PersonaPack %q: %w", packName, err)}
+		}
+
+		enabled := 0
+		for _, p := range personas {
+			if p.enabled {
+				enabled++
+			}
+		}
+		result := tuiSuccessStyle.Render(fmt.Sprintf("✓ PersonaPack %s updated: %d/%d personas enabled", packName, enabled, len(personas)))
 		return cmdResultMsg{output: result}
 	}
 }
@@ -5621,7 +5765,7 @@ func (m tuiModel) renderStatusBar() string {
 		keys = []string{"y", "confirm delete", "any", "cancel"}
 	} else {
 		keys = []string{
-			"Tab", "next view",
+			"←/→", "switch view",
 			"1-8", "views",
 			"Enter", "detail",
 			"Esc", "back",
@@ -5663,7 +5807,12 @@ func (m tuiModel) renderDeleteConfirm(base string) string {
 	var content strings.Builder
 	content.WriteString(tuiModalTitleStyle.Render("  ⚠  Confirm Delete"))
 	content.WriteString("\n\n")
-	content.WriteString(fmt.Sprintf("  Delete %s %s?\n\n",
+	action := "Delete"
+	if strings.HasPrefix(m.deleteResourceKind, "persona in pack") || strings.HasPrefix(m.deleteResourceKind, "all personas in pack") {
+		action = "Disable"
+	}
+	content.WriteString(fmt.Sprintf("  %s %s %s?\n\n",
+		action,
 		tuiModalCmdStyle.Render(m.deleteResourceKind),
 		tuiModalCmdStyle.Render(m.deleteResourceName)))
 	content.WriteString(fmt.Sprintf("  %s to confirm, any other key to cancel",
@@ -5731,25 +5880,31 @@ func (m tuiModel) renderEditModal(base string) string {
 	var content strings.Builder
 
 	// Title
-	title := "Edit " + m.editInstanceName
-	if m.editScheduleName != "" {
-		title += " / " + m.editScheduleName
+	if m.editPersonaPackName != "" {
+		content.WriteString(tuiModalTitleStyle.Render("  ✎  Edit PersonaPack " + m.editPersonaPackName))
+	} else {
+		title := "Edit " + m.editInstanceName
+		if m.editScheduleName != "" {
+			title += " / " + m.editScheduleName
+		}
+		content.WriteString(tuiModalTitleStyle.Render("  ✎  " + title))
 	}
-	content.WriteString(tuiModalTitleStyle.Render("  ✎  " + title))
 	content.WriteString("\n\n")
 
-	// Tab bar
-	for i, name := range editTabNames {
-		if i == m.editTab {
-			content.WriteString(tuiSuggestSelectedStyle.Render(" " + name + " "))
-		} else {
-			content.WriteString(tuiSuggestStyle.Render(" " + name + " "))
+	// Tab bar (not shown for persona pack edit)
+	if m.editPersonaPackName == "" {
+		for i, name := range editTabNames {
+			if i == m.editTab {
+				content.WriteString(tuiSuggestSelectedStyle.Render(" " + name + " "))
+			} else {
+				content.WriteString(tuiSuggestStyle.Render(" " + name + " "))
+			}
+			content.WriteString(" ")
 		}
-		content.WriteString(" ")
+		content.WriteString("\n")
+		content.WriteString(tuiDimStyle.Render("  ─────────────────────────────────"))
+		content.WriteString("\n\n")
 	}
-	content.WriteString("\n")
-	content.WriteString(tuiDimStyle.Render("  ─────────────────────────────────"))
-	content.WriteString("\n\n")
 
 	highlight := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#1A1A2E")).
@@ -5782,7 +5937,33 @@ func (m tuiModel) renderEditModal(base string) string {
 		renderField(idx, name, tog)
 	}
 
-	if m.editTab == 0 {
+	if m.editPersonaPackName != "" {
+		// PersonaPack edit — persona toggles
+		content.WriteString(tuiDimStyle.Render("  Toggle personas on/off with space or enter:") + "\n\n")
+		if len(m.editPersonas) == 0 {
+			content.WriteString(tuiDimStyle.Render("  No personas defined in this pack.") + "\n")
+		} else {
+			for i, p := range m.editPersonas {
+				tog := "○"
+				if p.enabled {
+					tog = "●"
+				}
+				lbl := fmt.Sprintf("  %s %s", tog, p.displayName)
+				if p.name != p.displayName {
+					lbl += tuiDimStyle.Render(" (" + p.name + ")")
+				}
+				if m.editField == i {
+					lbl = highlight.Render(fmt.Sprintf("▸ %s %s", tog, p.displayName))
+					if p.name != p.displayName {
+						lbl += tuiDimStyle.Render(" (" + p.name + ")")
+					}
+				} else {
+					lbl = value.Render(lbl)
+				}
+				content.WriteString("  " + lbl + "\n")
+			}
+		}
+	} else if m.editTab == 0 {
 		// Memory tab
 		renderBool(0, "Enabled", m.editMemory.enabled)
 		renderField(1, "MaxSizeKB", m.editMemory.maxSizeKB)
@@ -5862,6 +6043,9 @@ func (m tuiModel) renderEditModal(base string) string {
 		content.WriteString("  " + tiView)
 		content.WriteString("\n")
 		content.WriteString(tuiDimStyle.Render("  enter confirm · esc cancel"))
+	} else if m.editPersonaPackName != "" {
+		content.WriteString("\n")
+		content.WriteString(tuiDimStyle.Render("  ↑↓ navigate · space/enter toggle · ctrl+s apply · esc cancel"))
 	} else {
 		content.WriteString("\n")
 		content.WriteString(tuiDimStyle.Render("  tab switch tabs · ↑↓ navigate · enter toggle/edit"))
@@ -6247,6 +6431,57 @@ func tuiDeletePersonaPack(ns, packName string) (string, error) {
 	}
 
 	return tuiSuccessStyle.Render(fmt.Sprintf("✓ Deleted PersonaPack %s (owned resources will be garbage-collected)", packName)), nil
+}
+
+func tuiDisablePackPersona(ns, packName, personaName string) (string, error) {
+	ctx := context.Background()
+
+	var pack sympoziumv1alpha1.PersonaPack
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: packName, Namespace: ns}, &pack); err != nil {
+		return "", fmt.Errorf("PersonaPack %q not found: %w", packName, err)
+	}
+
+	// Check if already excluded.
+	for _, p := range pack.Spec.ExcludePersonas {
+		if p == personaName {
+			return tuiDimStyle.Render(fmt.Sprintf("Persona %q is already disabled in pack %s", personaName, packName)), nil
+		}
+	}
+
+	pack.Spec.ExcludePersonas = append(pack.Spec.ExcludePersonas, personaName)
+	if err := k8sClient.Update(ctx, &pack); err != nil {
+		return "", fmt.Errorf("update PersonaPack %q: %w", packName, err)
+	}
+
+	return tuiSuccessStyle.Render(fmt.Sprintf("✓ Disabled persona %q in pack %s (controller will clean up resources)", personaName, packName)), nil
+}
+
+func tuiDisableAllPackPersonas(ns, packName string, personaNames []string) (string, error) {
+	ctx := context.Background()
+
+	var pack sympoziumv1alpha1.PersonaPack
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: packName, Namespace: ns}, &pack); err != nil {
+		return "", fmt.Errorf("PersonaPack %q not found: %w", packName, err)
+	}
+
+	// Build full exclusion list (deduplicated).
+	excluded := make(map[string]bool)
+	for _, e := range pack.Spec.ExcludePersonas {
+		excluded[e] = true
+	}
+	for _, name := range personaNames {
+		excluded[name] = true
+	}
+	pack.Spec.ExcludePersonas = make([]string, 0, len(excluded))
+	for name := range excluded {
+		pack.Spec.ExcludePersonas = append(pack.Spec.ExcludePersonas, name)
+	}
+
+	if err := k8sClient.Update(ctx, &pack); err != nil {
+		return "", fmt.Errorf("update PersonaPack %q: %w", packName, err)
+	}
+
+	return tuiSuccessStyle.Render(fmt.Sprintf("✓ Disabled all %d personas in pack %s (controller will clean up resources)", len(personaNames), packName)), nil
 }
 
 func tuiShowMemory(ns, instanceName string) (string, error) {

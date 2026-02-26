@@ -61,6 +61,13 @@ func (r *PersonaPackReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var installed []sympoziumv1alpha1.InstalledPersona
 	var installErr error
 	for _, persona := range pack.Spec.Personas {
+		// Skip personas that have been excluded (disabled via TUI).
+		if isExcluded(persona.Name, pack.Spec.ExcludePersonas) {
+			if err := r.cleanupPersona(ctx, log, pack, &persona); err != nil {
+				log.Error(err, "Failed to clean up excluded persona", "persona", persona.Name)
+			}
+			continue
+		}
 		ip, err := r.reconcilePersona(ctx, log, pack, &persona)
 		if err != nil {
 			log.Error(err, "Failed to reconcile persona", "persona", persona.Name)
@@ -311,6 +318,58 @@ func intervalToCron(interval string) string {
 		}
 		return "0 * * * *" // default: hourly
 	}
+}
+
+// isExcluded checks whether a persona name appears in the exclusion list.
+func isExcluded(name string, excludes []string) bool {
+	for _, e := range excludes {
+		if e == name {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanupPersona deletes the Instance, Schedule, and memory ConfigMap
+// for a persona that has been excluded from the pack.
+func (r *PersonaPackReconciler) cleanupPersona(
+	ctx context.Context,
+	log logr.Logger,
+	pack *sympoziumv1alpha1.PersonaPack,
+	persona *sympoziumv1alpha1.PersonaSpec,
+) error {
+	instanceName := pack.Name + "-" + persona.Name
+
+	// Delete SympoziumInstance
+	inst := &sympoziumv1alpha1.SympoziumInstance{}
+	if err := r.Get(ctx, client.ObjectKey{Name: instanceName, Namespace: pack.Namespace}, inst); err == nil {
+		log.Info("Deleting excluded persona instance", "instance", instanceName)
+		if err := r.Delete(ctx, inst); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete instance %s: %w", instanceName, err)
+		}
+	}
+
+	// Delete SympoziumSchedule
+	schedName := instanceName + "-schedule"
+	sched := &sympoziumv1alpha1.SympoziumSchedule{}
+	if err := r.Get(ctx, client.ObjectKey{Name: schedName, Namespace: pack.Namespace}, sched); err == nil {
+		log.Info("Deleting excluded persona schedule", "schedule", schedName)
+		if err := r.Delete(ctx, sched); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete schedule %s: %w", schedName, err)
+		}
+	}
+
+	// Delete memory ConfigMap
+	cmName := instanceName + "-memory"
+	var cm corev1.ConfigMap
+	if err := r.Get(ctx, client.ObjectKey{Name: cmName, Namespace: pack.Namespace}, &cm); err == nil {
+		log.Info("Deleting excluded persona memory", "configmap", cmName)
+		if err := r.Delete(ctx, &cm); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete configmap %s: %w", cmName, err)
+		}
+	}
+
+	return nil
 }
 
 // reconcileDelete cleans up resources owned by the PersonaPack.

@@ -28,6 +28,13 @@ type PersonaPackSpec struct {
 	// +optional
 	AuthRefs []SecretRef `json:"authRefs,omitempty"`
 
+	// ExcludePersonas lists persona names to skip during reconciliation.
+	// Personas listed here will not have their Instance/Schedule created,
+	// and existing resources for them will be deleted. Set by the TUI when
+	// a user disables an individual persona.
+	// +optional
+	ExcludePersonas []string `json:"excludePersonas,omitempty"`
+
 	// PolicyRef references the SympoziumPolicy to apply to all generated instances.
 	// +optional
 	PolicyRef string `json:"policyRef,omitempty"`

@@ -84,6 +84,15 @@ spec:
                 description: Description is a human-readable summary of this persona
                   pack.
                 type: string
+              excludePersonas:
+                description: |-
+                  ExcludePersonas lists persona names to skip during reconciliation.
+                  Personas listed here will not have their Instance/Schedule created,
+                  and existing resources for them will be deleted. Set by the TUI when
+                  a user disables an individual persona.
+                items:
+                  type: string
+                type: array
               personas:
                 description: Personas is the list of agent personas in this pack.
                 items:

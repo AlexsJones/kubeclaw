@@ -323,6 +323,10 @@ All generated resources have `ownerReferences` pointing back to the PersonaPack 
 
 **Activating a pack in the TUI:**
 
+<p align="center">
+  <img src="personas.gif" alt="PersonaPack activation in the TUI" width="800px;">
+</p>
+
 1. Launch `sympozium` — the TUI opens on the **Personas** tab (view 1)
 2. Select a pack and press **Enter** to start the onboarding wizard
 3. Choose your AI provider and paste an API key
