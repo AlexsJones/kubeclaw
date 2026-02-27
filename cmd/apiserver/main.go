@@ -102,7 +102,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		if err := server.Start(addr); err != nil {
+		if err := server.Start(addr, token); err != nil {
 			log.Error(err, "api server failed")
 			os.Exit(1)
 		}

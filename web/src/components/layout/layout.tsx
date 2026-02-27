@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import { AppSidebar } from "./sidebar";
 import { Header } from "./header";
+import { FeedPane } from "@/components/feed-pane";
 
 export function Layout() {
+  const [feedOpen, setFeedOpen] = useState(false);
+
   return (
     <div className="flex h-screen overflow-hidden">
       <AppSidebar />
@@ -12,6 +16,7 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+      <FeedPane open={feedOpen} onToggle={() => setFeedOpen((v) => !v)} />
     </div>
   );
 }

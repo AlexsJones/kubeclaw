@@ -12,7 +12,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchInterval: 5000,
-      retry: 1,
+      // Don't retry on 401 (bad token) — retry other transient errors twice.
+      retry: (failureCount, error) => {
+        if (error instanceof Error && "status" in error && (error as { status: number }).status === 401) return false;
+        return failureCount < 2;
+      },
       staleTime: 2000,
     },
   },

@@ -185,6 +185,30 @@ export function useDeletePersonaPack() {
   });
 }
 
+export function useActivatePersonaPack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      name,
+      ...data
+    }: {
+      name: string;
+      enabled?: boolean;
+      provider?: string;
+      secretName?: string;
+      model?: string;
+      baseURL?: string;
+      channelConfigs?: Record<string, string>;
+      policyRef?: string;
+    }) => api.personaPacks.patch(name, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["personaPacks"] });
+      toast.success("Persona pack updated");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
 // ── Pods ─────────────────────────────────────────────────────────────────────
 
 export function usePods() {

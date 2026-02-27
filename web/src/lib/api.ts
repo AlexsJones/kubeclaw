@@ -335,6 +335,16 @@ export interface PodInfo {
 
 // ── API client ───────────────────────────────────────────────────────────────
 
+/** Typed error so callers can inspect the HTTP status code. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 const TOKEN_KEY = "sympozium_token";
 const NS_KEY = "sympozium_namespace";
 
@@ -360,12 +370,15 @@ export function setNamespace(ns: string) {
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(init?.headers as Record<string, string>),
-  };
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+    // Ensure the token only contains valid HTTP header characters (Latin1).
+    // Strip any non-Latin1 codepoints that can cause Firefox ByteString errors.
+    const safeToken = token.replace(/[^\x00-\xFF]/g, "");
+    headers.set("Authorization", `Bearer ${safeToken}`);
   }
 
   const ns = getNamespace();
@@ -374,9 +387,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(url, { ...init, headers });
   if (res.status === 401) {
-    clearToken();
-    window.location.href = "/login";
-    throw new Error("Unauthorized");
+    // Don't clear the token — the server may be restarting or temporarily
+    // unavailable.  Let the caller (React Query) handle retries.  The user
+    // can explicitly log out via the UI.
+    throw new ApiError("Unauthorized", 401);
   }
   if (res.status === 204) return undefined as T;
   if (!res.ok) {
@@ -464,6 +478,22 @@ export const api = {
       apiFetch<PersonaPack>(`/api/v1/personapacks/${name}`),
     delete: (name: string) =>
       apiFetch<void>(`/api/v1/personapacks/${name}`, { method: "DELETE" }),
+    patch: (
+      name: string,
+      data: {
+        enabled?: boolean;
+        provider?: string;
+        secretName?: string;
+        model?: string;
+        baseURL?: string;
+        channelConfigs?: Record<string, string>;
+        policyRef?: string;
+      }
+    ) =>
+      apiFetch<PersonaPack>(`/api/v1/personapacks/${name}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
   },
 
   pods: {

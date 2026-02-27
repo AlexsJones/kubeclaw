@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useInstances, useDeleteInstance, useCreateInstance } from "@/hooks/use-api";
 import { StatusBadge } from "@/components/status-badge";
+import { OnboardingWizard, type WizardResult } from "@/components/onboarding-wizard";
 import {
   Table,
   TableHeader,
@@ -12,22 +13,6 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Trash2, ExternalLink } from "lucide-react";
 import { formatAge } from "@/lib/utils";
@@ -36,28 +21,25 @@ export function InstancesPage() {
   const { data, isLoading } = useInstances();
   const deleteInstance = useDeleteInstance();
   const createInstance = useCreateInstance();
-  const [open, setOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    provider: "openai",
-    model: "gpt-4o",
-    baseURL: "",
-    secretName: "",
-  });
 
   const filtered = (data || []).filter((inst) =>
     inst.metadata.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleCreate = () => {
-    createInstance.mutate(form, {
-      onSuccess: () => {
-        setOpen(false);
-        setForm({ name: "", provider: "openai", model: "gpt-4o", baseURL: "", secretName: "" });
+  function handleComplete(result: WizardResult) {
+    createInstance.mutate(
+      {
+        name: result.name,
+        provider: result.provider,
+        model: result.model,
+        baseURL: result.baseURL || undefined,
+        secretName: result.secretName || undefined,
       },
-    });
-  };
+      { onSuccess: () => setWizardOpen(false) }
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -68,80 +50,13 @@ export function InstancesPage() {
             Manage SympoziumInstances — each represents an agent identity
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white border-0">
-              <Plus className="mr-2 h-4 w-4" /> Create Instance
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create Instance</DialogTitle>
-              <DialogDescription>
-                Create a new SympoziumInstance with provider configuration.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="my-agent"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Provider</Label>
-                <Select
-                  value={form.provider}
-                  onValueChange={(v) => setForm({ ...form, provider: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="anthropic">Anthropic</SelectItem>
-                    <SelectItem value="azure-openai">Azure OpenAI</SelectItem>
-                    <SelectItem value="ollama">Ollama</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <Input
-                  value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
-                  placeholder="gpt-4o"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Base URL (optional)</Label>
-                <Input
-                  value={form.baseURL}
-                  onChange={(e) => setForm({ ...form, baseURL: e.target.value })}
-                  placeholder="https://api.openai.com/v1"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Secret Name (optional)</Label>
-                <Input
-                  value={form.secretName}
-                  onChange={(e) => setForm({ ...form, secretName: e.target.value })}
-                  placeholder="my-api-key"
-                />
-              </div>
-              <Button
-                className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white border-0"
-                onClick={handleCreate}
-                disabled={!form.name || createInstance.isPending}
-              >
-                {createInstance.isPending ? "Creating…" : "Create"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button
+          size="sm"
+          className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white border-0"
+          onClick={() => setWizardOpen(true)}
+        >
+          <Plus className="mr-2 h-4 w-4" /> Create Instance
+        </Button>
       </div>
 
       <Input
@@ -225,6 +140,16 @@ export function InstancesPage() {
           </TableBody>
         </Table>
       )}
+
+      {/* Shared onboarding wizard in instance mode */}
+      <OnboardingWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        mode="instance"
+        defaults={{ provider: "openai", model: "gpt-4o" }}
+        onComplete={handleComplete}
+        isPending={createInstance.isPending}
+      />
     </div>
   );
 }

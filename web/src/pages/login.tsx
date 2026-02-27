@@ -19,8 +19,11 @@ export function LoginPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (token.trim()) {
-      login(token.trim());
+    const trimmed = token.trim();
+    if (trimmed) {
+      // Strip non-ASCII characters that would break HTTP headers (Firefox ByteString error)
+      const safeToken = trimmed.replace(/[^\x20-\x7E]/g, "");
+      login(safeToken);
       navigate("/dashboard");
     }
   };

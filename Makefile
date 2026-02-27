@@ -108,6 +108,39 @@ web-dev: ## Start the frontend dev server (hot-reload, proxy to :8080)
 web-clean: ## Remove frontend build artifacts
 	rm -rf web/dist web/node_modules
 
+##@ Local Development
+
+SYMPOZIUM_TOKEN ?= dev-token
+SYMPOZIUM_NAMESPACE ?= sympozium-system
+API_ADDR ?= :8080
+VITE_PORT ?= 5173
+
+NATS_LOCAL_PORT ?= 4222
+
+port-forward-nats: ## Port-forward NATS from the cluster to localhost:4222
+	kubectl port-forward -n sympozium-system svc/nats $(NATS_LOCAL_PORT):4222
+
+serve-api: build-apiserver ## Run the API server locally (connects to current kubeconfig cluster)
+	SYMPOZIUM_UI_TOKEN=$(SYMPOZIUM_TOKEN) $(BIN_DIR)/apiserver \
+		--addr $(API_ADDR) \
+		--namespace $(SYMPOZIUM_NAMESPACE) \
+		--serve-ui=false \
+		--event-bus-url nats://localhost:$(NATS_LOCAL_PORT)
+
+serve-api-ui: web-build build-apiserver ## Run the API server with embedded UI (production-like, no hot-reload)
+	SYMPOZIUM_UI_TOKEN=$(SYMPOZIUM_TOKEN) $(BIN_DIR)/apiserver \
+		--addr $(API_ADDR) \
+		--namespace $(SYMPOZIUM_NAMESPACE) \
+		--serve-ui=true \
+		--event-bus-url nats://localhost:$(NATS_LOCAL_PORT)
+
+dev: ## Start API server, Vite dev server, and NATS port-forward for rapid local iteration
+	@echo "==> Starting API server on $(API_ADDR), Vite dev server on :$(VITE_PORT), NATS port-forward on :$(NATS_LOCAL_PORT)"
+	@echo "==> Open http://localhost:$(VITE_PORT) in your browser"
+	@echo "==> API token: $(SYMPOZIUM_TOKEN)"
+	@echo ""
+	$(MAKE) -j3 port-forward-nats serve-api web-dev
+
 ##@ Docker
 
 docker-build: $(addprefix docker-build-,$(IMAGES)) ## Build all Docker images

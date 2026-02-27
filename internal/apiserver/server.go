@@ -42,15 +42,16 @@ func NewServer(c client.Client, bus eventbus.EventBus, log logr.Logger) *Server 
 	}
 }
 
-// Start starts the HTTP server.
-func (s *Server) Start(addr string) error {
+// Start starts the HTTP server (headless, no embedded UI).
+// When token is non-empty the auth middleware is applied.
+func (s *Server) Start(addr, token string) error {
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           s.buildMux(nil, ""),
+		Handler:           s.buildMux(nil, token),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	s.log.Info("Starting API server", "addr", addr)
+	s.log.Info("Starting API server", "addr", addr, "auth", token != "")
 	return server.ListenAndServe()
 }
 
@@ -102,6 +103,8 @@ func (s *Server) buildMux(frontendFS fs.FS, token string) http.Handler {
 	// PersonaPack endpoints
 	mux.HandleFunc("GET /api/v1/personapacks", s.listPersonaPacks)
 	mux.HandleFunc("GET /api/v1/personapacks/{name}", s.getPersonaPack)
+	mux.HandleFunc("PATCH /api/v1/personapacks/{name}", s.patchPersonaPack)
+	mux.HandleFunc("DELETE /api/v1/personapacks/{name}", s.deletePersonaPack)
 
 	// WebSocket streaming
 	mux.HandleFunc("/ws/stream", s.handleStream)
@@ -638,6 +641,86 @@ func (s *Server) getPersonaPack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, pp)
+}
+
+// PatchPersonaPackRequest represents a partial update to a PersonaPack.
+type PatchPersonaPackRequest struct {
+	Enabled        *bool              `json:"enabled,omitempty"`
+	Provider       string             `json:"provider,omitempty"`
+	SecretName     string             `json:"secretName,omitempty"`
+	Model          string             `json:"model,omitempty"`
+	BaseURL        string             `json:"baseURL,omitempty"`
+	ChannelConfigs map[string]string  `json:"channelConfigs,omitempty"`
+	PolicyRef      string             `json:"policyRef,omitempty"`
+}
+
+func (s *Server) patchPersonaPack(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var req PatchPersonaPackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var pp sympoziumv1alpha1.PersonaPack
+	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: ns}, &pp); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if req.Enabled != nil {
+		pp.Spec.Enabled = *req.Enabled
+	}
+
+	if req.Provider != "" && req.SecretName != "" {
+		pp.Spec.AuthRefs = []sympoziumv1alpha1.SecretRef{
+			{Provider: req.Provider, Secret: req.SecretName},
+		}
+	}
+
+	if req.Model != "" {
+		for i := range pp.Spec.Personas {
+			pp.Spec.Personas[i].Model = req.Model
+		}
+	}
+
+	if req.ChannelConfigs != nil {
+		pp.Spec.ChannelConfigs = req.ChannelConfigs
+	}
+
+	if req.PolicyRef != "" {
+		pp.Spec.PolicyRef = req.PolicyRef
+	}
+
+	if err := s.client.Update(r.Context(), &pp); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, pp)
+}
+
+func (s *Server) deletePersonaPack(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	pp := &sympoziumv1alpha1.PersonaPack{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+	}
+	if err := s.client.Delete(r.Context(), pp); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- WebSocket streaming ---

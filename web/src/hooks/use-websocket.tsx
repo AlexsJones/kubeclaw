@@ -51,8 +51,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Strip non-Latin1 characters to avoid WebSocket URL encoding issues
+    const safeToken = token.replace(/[^\x00-\xFF]/g, "");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws/stream?token=${encodeURIComponent(token)}`;
+    const url = `${protocol}//${window.location.host}/ws/stream?token=${encodeURIComponent(safeToken)}`;
 
     try {
       const ws = new WebSocket(url);
