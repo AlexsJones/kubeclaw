@@ -33,11 +33,14 @@ IMAGES = controller apiserver ipc-bridge webhook agent-runner \
          channel-telegram channel-whatsapp channel-discord channel-slack \
          skill-k8s-ops
 
-.PHONY: all build test clean generate manifests docker-build docker-push install help web-build web-dev web-clean web-install
+.PHONY: all build test clean generate manifests docker-build docker-push install help web-build web-dev web-clean web-install setup-hooks
 
 all: build
 
 ##@ General
+
+setup-hooks: ## Configure git to use .githooks (enables pre-commit formatting check)
+	git config core.hooksPath .githooks
 
 help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)

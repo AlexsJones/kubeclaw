@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Pre-commit hook: ensure all Go files are gofmt-formatted before committing.
+
+set -euo pipefail
+
+unformatted=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*') 2>/dev/null || true)
+
+if [ -n "$unformatted" ]; then
+  echo "ERROR: The following Go files are not formatted:"
+  echo "$unformatted"
+  echo ""
+  echo "Run 'make fmt' or 'gofmt -s -w .' to fix, then re-add and commit."
+  exit 1
+fi
