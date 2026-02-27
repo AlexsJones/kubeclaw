@@ -380,23 +380,58 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		req.Timeout = "5m"
 	}
 
+	// Look up the SympoziumInstance to inherit auth, model, and skills.
+	var inst sympoziumv1alpha1.SympoziumInstance
+	if err := s.client.Get(r.Context(), types.NamespacedName{Name: req.InstanceRef, Namespace: ns}, &inst); err != nil {
+		if k8serrors.IsNotFound(err) {
+			http.Error(w, fmt.Sprintf("instance %q not found in namespace %q", req.InstanceRef, ns), http.StatusNotFound)
+		} else {
+			http.Error(w, "failed to get instance: "+err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Resolve auth secret and provider from instance — first AuthRef wins.
+	authSecret := ""
+	provider := "openai"
+	if len(inst.Spec.AuthRefs) > 0 {
+		authSecret = inst.Spec.AuthRefs[0].Secret
+		if inst.Spec.AuthRefs[0].Provider != "" {
+			provider = inst.Spec.AuthRefs[0].Provider
+		}
+	}
+	if authSecret == "" {
+		http.Error(w, fmt.Sprintf("instance %q has no API key configured (authRefs is empty)", req.InstanceRef), http.StatusBadRequest)
+		return
+	}
+
+	// Use request-supplied model or fall back to the instance default.
+	model := req.Model
+	if model == "" {
+		model = inst.Spec.Agents.Default.Model
+	}
+
 	run := &sympoziumv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: req.InstanceRef + "-",
 			Namespace:    ns,
+			Labels: map[string]string{
+				"sympozium.ai/instance": req.InstanceRef,
+			},
 		},
 		Spec: sympoziumv1alpha1.AgentRunSpec{
 			InstanceRef: req.InstanceRef,
 			AgentID:     req.AgentID,
 			SessionKey:  req.SessionKey,
 			Task:        req.Task,
+			Model: sympoziumv1alpha1.ModelSpec{
+				Provider:      provider,
+				Model:         model,
+				BaseURL:       inst.Spec.Agents.Default.BaseURL,
+				AuthSecretRef: authSecret,
+			},
+			Skills: inst.Spec.Skills,
 		},
-	}
-
-	if req.Model != "" {
-		run.Spec.Model = sympoziumv1alpha1.ModelSpec{
-			Model: req.Model,
-		}
 	}
 
 	if err := s.client.Create(r.Context(), run); err != nil {
