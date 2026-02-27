@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 6% 7%;
+    --foreground: 226 64% 88%;
+    --card: 240 6% 10%;
+    --card-foreground: 226 64% 88%;
+    --popover: 240 6% 10%;
+    --popover-foreground: 226 64% 88%;
+    --primary: 350 65% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 226 64% 88%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 233 10% 55%;
+    --accent: 199 76% 69%;
+    --accent-foreground: 240 6% 7%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 350 65% 52%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(240 4% 20%);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(240 4% 28%);
+}
+
+/* Phase tag colors */
+.phase-running {
+  @apply bg-blue-500/20 text-blue-400 border-blue-500/30;
+}
+.phase-succeeded {
+  @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30;
+}
+.phase-failed {
+  @apply bg-red-500/20 text-red-400 border-red-500/30;
+}
+.phase-pending {
+  @apply bg-yellow-500/20 text-yellow-400 border-yellow-500/30;
+}
+.phase-ready {
+  @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30;
+}

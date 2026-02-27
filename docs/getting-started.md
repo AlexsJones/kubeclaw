@@ -137,9 +137,72 @@ After onboarding you land in the TUI dashboard — your agent is live.
 
 ---
 
+## The web dashboard
+
+Sympozium ships with a full web UI embedded inside the API server pod. To
+access it from your workstation, use the CLI:
+
+```bash
+sympozium serve
+```
+
+This port-forwards the in-cluster API server to `http://127.0.0.1:8080` and
+prints the authentication token. Log in with the token shown in the terminal.
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8080` | Local port to forward to |
+| `--open` | `false` | Automatically open a browser |
+| `--service-namespace` | `sympozium-system` | Namespace of the apiserver service |
+
+### Manual access
+
+If you prefer to port-forward manually:
+
+```bash
+kubectl port-forward -n sympozium-system svc/sympozium-apiserver 8080:8080
+```
+
+Retrieve the UI token:
+
+```bash
+kubectl get secret sympozium-ui-token -n sympozium-system \
+  -o jsonpath='{.data.token}' | base64 -d
+```
+
+### What you can do
+
+The web dashboard provides a graphical interface for **all** Sympozium actions:
+
+- **Dashboard** — cluster overview with instance counts, run stats, and recent activity
+- **Instances** — list, create, and delete SympoziumInstances
+- **Runs** — view all AgentRuns, inspect logs, create new runs
+- **Policies** — browse SympoziumPolicy rules
+- **Skills** — explore installed SkillPacks
+- **Schedules** — list and manage SympoziumSchedules
+- **Personas** — browse and activate PersonaPacks
+
+### Helm values
+
+When installing via Helm, configure the web UI through `values.yaml`:
+
+```yaml
+apiserver:
+  webUI:
+    enabled: true       # Serve the embedded web dashboard (default: true)
+    token: ""           # Explicit token; leave blank to auto-generate a Secret
+```
+
+If `token` is left empty, Helm creates a `<release>-ui-token` Secret with a
+random 32-character token.
+
+---
+
 ## The TUI dashboard
 
-Once onboarded, launch the dashboard:
+Once onboarded, launch the terminal dashboard:
 
 ```bash
 sympozium

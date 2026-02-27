@@ -103,6 +103,14 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - --event-bus-url=nats://nats.sympozium-system.svc:4222
+            - --serve-ui
+          env:
+            - name: SYMPOZIUM_UI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sympozium-ui-token
+                  key: token
+                  optional: true
           ports:
             - containerPort: 8080
               name: http

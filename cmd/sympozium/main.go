@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"context"
+	cryptoRand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,7 +54,7 @@ Running without a subcommand launches the interactive TUI.`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip K8s client init for commands that don't need it.
 			switch cmd.Name() {
-			case "version", "install", "uninstall", "onboard", "tui", "sympozium":
+			case "version", "install", "uninstall", "onboard", "tui", "sympozium", "serve":
 				return nil
 			}
 			return initClient()
@@ -84,6 +85,7 @@ Running without a subcommand launches the interactive TUI.`,
 		newFeaturesCmd(),
 		newVersionCmd(),
 		newTUICmd(),
+		newServeCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -1136,8 +1138,25 @@ func runInstall(ver, imageTag string) error {
 		}
 	}
 
+	// Generate a random UI token for the web dashboard (if not already present).
+	fmt.Println("  Creating web UI token secret...")
+	if err := kubectlQuiet("get", "secret", "sympozium-ui-token", "-n", "sympozium-system"); err != nil {
+		// Secret doesn't exist — create one with a random token.
+		createSecret := exec.Command("kubectl", "create", "secret", "generic", "sympozium-ui-token",
+			"-n", "sympozium-system",
+			"--from-literal=token="+generateToken(32))
+		createSecret.Stderr = os.Stderr
+		if secErr := createSecret.Run(); secErr != nil {
+			fmt.Printf("  Warning: failed to create UI token secret: %v\n", secErr)
+		}
+	} else {
+		fmt.Println("  UI token secret already exists, skipping.")
+	}
+
 	fmt.Println("\n  Sympozium installed successfully!")
 	fmt.Println("  Run: sympozium")
+	fmt.Println("\n  To access the web dashboard:")
+	fmt.Println("    sympozium serve")
 	return nil
 }
 
@@ -1277,6 +1296,17 @@ func resolveConfigPath(bundleDir, relPath string) string {
 	}
 	// Return the bundled path anyway; kubectl will report the error.
 	return bundled
+}
+
+// generateToken returns a random alphanumeric string of the given length.
+func generateToken(n int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, n)
+	_, _ = io.ReadFull(cryptoRand.Reader, b)
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8585,4 +8615,94 @@ func wrapText(s string, maxWidth int) []string {
 		result = append(result, line)
 	}
 	return result
+}
+
+// ---------- serve command ----------
+
+func newServeCmd() *cobra.Command {
+	var localPort string
+	var openBrowser bool
+	var svcNamespace string
+
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Open the Sympozium web dashboard via port-forward",
+		Long: `Port-forwards the in-cluster API server (which hosts the embedded web UI)
+to a local port and optionally opens a browser.
+
+The web UI runs inside the sympozium-apiserver pod that was deployed by
+'sympozium install' or the Helm chart. This command simply creates a
+'kubectl port-forward' tunnel so you can access it locally.
+
+The API server authenticates requests with a bearer token stored in a
+Kubernetes Secret. This command retrieves it automatically and prints
+the login URL.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns := svcNamespace
+			if ns == "" {
+				ns = "sympozium-system"
+			}
+
+			// Retrieve the UI token from the cluster secret.
+			fmt.Println("  Retrieving UI token...")
+			tokenBytes, err := exec.Command("kubectl", "get", "secret", "sympozium-ui-token",
+				"-n", ns, "-o", "jsonpath={.data.token}").CombinedOutput()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: could not retrieve UI token secret: %v\n", err)
+				fmt.Fprintln(os.Stderr, "  You may need to set one manually — see 'sympozium serve --help'.")
+			}
+			var token string
+			if len(tokenBytes) > 0 {
+				decoded, decErr := exec.Command("sh", "-c",
+					fmt.Sprintf("echo %s | base64 -d", string(tokenBytes))).CombinedOutput()
+				if decErr == nil {
+					token = strings.TrimSpace(string(decoded))
+				}
+			}
+
+			listenAddr := fmt.Sprintf("127.0.0.1:%s", localPort)
+			svcTarget := fmt.Sprintf("svc/sympozium-apiserver:%s", "8080")
+
+			fmt.Printf("\n  Starting port-forward to %s in namespace %s...\n", svcTarget, ns)
+			fmt.Printf("  ➜  Web UI:  http://%s\n", listenAddr)
+			if token != "" {
+				fmt.Printf("  ➜  Token:   %s\n", token)
+			} else {
+				fmt.Println("  ➜  Token:   (not found — check the sympozium-ui-token secret)")
+			}
+			fmt.Println("  Press Ctrl+C to stop.")
+
+			if openBrowser {
+				// Give port-forward a moment to bind, then open browser.
+				go func() {
+					time.Sleep(2 * time.Second)
+					url := fmt.Sprintf("http://%s", listenAddr)
+					// Try common openers.
+					for _, opener := range []string{"xdg-open", "open", "sensible-browser"} {
+						if p, err := exec.LookPath(opener); err == nil {
+							_ = exec.Command(p, url).Start()
+							return
+						}
+					}
+				}()
+			}
+
+			// Run kubectl port-forward (blocks until Ctrl+C).
+			pf := exec.Command("kubectl", "port-forward",
+				"-n", ns,
+				svcTarget,
+				fmt.Sprintf("%s:8080", localPort),
+			)
+			pf.Stdout = os.Stdout
+			pf.Stderr = os.Stderr
+			pf.Stdin = os.Stdin
+			return pf.Run()
+		},
+	}
+
+	cmd.Flags().StringVar(&localPort, "port", "8080", "Local port to forward to")
+	cmd.Flags().BoolVar(&openBrowser, "open", false, "Open a browser automatically")
+	cmd.Flags().StringVar(&svcNamespace, "service-namespace", "sympozium-system", "Namespace of the sympozium-apiserver service")
+
+	return cmd
 }

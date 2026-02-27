@@ -46,6 +46,14 @@ apiserver:
   service:
     type: ClusterIP
     port: 8080
+  # -- Web UI settings
+  webUI:
+    # -- Enable the embedded web dashboard
+    enabled: true
+    # -- Bearer token for API/UI authentication.
+    # If empty, a random token is generated and stored in a Secret.
+    # Retrieve it with: kubectl get secret <release>-ui-token -n <ns> -o jsonpath='{.data.token}' | base64 -d
+    token: ""
   nodeSelector: {}
   tolerations: []
   affinity: {}

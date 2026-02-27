@@ -33,7 +33,7 @@ IMAGES = controller apiserver ipc-bridge webhook agent-runner \
          channel-telegram channel-whatsapp channel-discord channel-slack \
          skill-k8s-ops
 
-.PHONY: all build test clean generate manifests docker-build docker-push install help
+.PHONY: all build test clean generate manifests docker-build docker-push install help web-build web-dev web-clean web-install
 
 all: build
 
@@ -93,6 +93,20 @@ generate: controller-gen ## Generate code (deepcopy, CRD manifests)
 manifests: controller-gen ## Generate CRD manifests
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
 	@$(MAKE) helm-sync
+
+##@ Web UI
+
+web-install: ## Install frontend dependencies
+	cd web && npm ci
+
+web-build: web-install ## Build the frontend for embedding
+	cd web && npm run build
+
+web-dev: ## Start the frontend dev server (hot-reload, proxy to :8080)
+	cd web && npm run dev
+
+web-clean: ## Remove frontend build artifacts
+	rm -rf web/dist web/node_modules
 
 ##@ Docker
 

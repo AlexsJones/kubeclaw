@@ -25,6 +25,21 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --event-bus-url={{ include "sympozium.natsUrl" . }}
+          {{- if .Values.apiserver.webUI.enabled }}
+            - --serve-ui
+          {{- end }}
+          env:
+          {{- if .Values.apiserver.webUI.token }}
+            - name: SYMPOZIUM_UI_TOKEN
+              value: {{ .Values.apiserver.webUI.token | quote }}
+          {{- else }}
+            - name: SYMPOZIUM_UI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sympozium.fullname" . }}-ui-token
+                  key: token
+                  optional: true
+          {{- end }}
           ports:
             - containerPort: 8080
               name: http

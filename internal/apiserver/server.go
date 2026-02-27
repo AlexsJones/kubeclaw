@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -42,17 +44,46 @@ func NewServer(c client.Client, bus eventbus.EventBus, log logr.Logger) *Server 
 
 // Start starts the HTTP server.
 func (s *Server) Start(addr string) error {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           s.buildMux(nil, ""),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	s.log.Info("Starting API server", "addr", addr)
+	return server.ListenAndServe()
+}
+
+// StartWithUI starts the HTTP server with an embedded frontend SPA
+// and optional bearer-token authentication.
+func (s *Server) StartWithUI(addr, token string, frontendFS fs.FS) error {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           s.buildMux(frontendFS, token),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	s.log.Info("Starting API server with UI", "addr", addr)
+	return server.ListenAndServe()
+}
+
+// buildMux creates the HTTP mux with all API routes.
+// When frontendFS is non-nil, it serves the SPA for non-API paths.
+// When token is non-empty, API routes require Bearer authentication.
+func (s *Server) buildMux(frontendFS fs.FS, token string) http.Handler {
 	mux := http.NewServeMux()
 
 	// Instance endpoints
 	mux.HandleFunc("GET /api/v1/instances", s.listInstances)
 	mux.HandleFunc("GET /api/v1/instances/{name}", s.getInstance)
+	mux.HandleFunc("POST /api/v1/instances", s.createInstance)
 	mux.HandleFunc("DELETE /api/v1/instances/{name}", s.deleteInstance)
 
 	// Run endpoints
 	mux.HandleFunc("GET /api/v1/runs", s.listRuns)
 	mux.HandleFunc("GET /api/v1/runs/{name}", s.getRun)
 	mux.HandleFunc("POST /api/v1/runs", s.createRun)
+	mux.HandleFunc("DELETE /api/v1/runs/{name}", s.deleteRun)
 
 	// Policy endpoints
 	mux.HandleFunc("GET /api/v1/policies", s.listPolicies)
@@ -86,14 +117,77 @@ func (s *Server) Start(addr string) error {
 	})
 	mux.Handle("/metrics", promhttp.Handler())
 
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+	// If a frontend FS is provided, serve it as an SPA fallback.
+	if frontendFS != nil {
+		mux.HandleFunc("/", s.spaHandler(frontendFS))
 	}
 
-	s.log.Info("Starting API server", "addr", addr)
-	return server.ListenAndServe()
+	// Wrap with auth middleware if a token is configured.
+	if token != "" {
+		return authMiddleware(token, mux)
+	}
+
+	return mux
+}
+
+// authMiddleware returns an http.Handler that checks for a valid Bearer token
+// or ?token= query parameter. Health and metrics endpoints are exempted.
+func authMiddleware(expectedToken string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Skip auth for health, metrics, and static assets.
+		if path == "/healthz" || path == "/readyz" || path == "/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip auth for non-API paths (frontend SPA assets).
+		if !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/ws/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check Authorization header or query param.
+		token := ""
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			token = strings.TrimPrefix(auth, "Bearer ")
+		}
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token != expectedToken {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// spaHandler serves the embedded SPA. Known static files are served directly;
+// all other paths return index.html for client-side routing.
+func (s *Server) spaHandler(frontendFS fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(frontendFS))
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" {
+			path = "index.html"
+		} else {
+			path = strings.TrimPrefix(path, "/")
+		}
+
+		// Try to open the file. If it exists, serve it.
+		if f, err := frontendFS.Open(path); err == nil {
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// Fallback to index.html for SPA routing.
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	}
 }
 
 // --- Instance handlers ---
@@ -145,6 +239,70 @@ func (s *Server) deleteInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// CreateInstanceRequest is the request body for creating a new SympoziumInstance.
+type CreateInstanceRequest struct {
+	Name      string `json:"name"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	BaseURL   string `json:"baseURL,omitempty"`
+	SecretName string `json:"secretName,omitempty"`
+	PolicyRef string `json:"policyRef,omitempty"`
+}
+
+func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var req CreateInstanceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" || req.Provider == "" || req.Model == "" {
+		http.Error(w, "name, provider, and model are required", http.StatusBadRequest)
+		return
+	}
+
+	inst := &sympoziumv1alpha1.SympoziumInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.Name,
+			Namespace: ns,
+		},
+		Spec: sympoziumv1alpha1.SympoziumInstanceSpec{
+			Agents: sympoziumv1alpha1.AgentsSpec{
+				Default: sympoziumv1alpha1.AgentConfig{
+					Model: req.Model,
+				},
+			},
+		},
+	}
+
+	if req.BaseURL != "" {
+		inst.Spec.Agents.Default.BaseURL = req.BaseURL
+	}
+
+	if req.SecretName != "" {
+		inst.Spec.AuthRefs = []sympoziumv1alpha1.SecretRef{
+			{Provider: req.Provider, Secret: req.SecretName},
+		}
+	}
+
+	if req.PolicyRef != "" {
+		inst.Spec.PolicyRef = req.PolicyRef
+	}
+
+	if err := s.client.Create(r.Context(), inst); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, inst)
 }
 
 // --- Run handlers ---
@@ -243,6 +401,24 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, run)
+}
+
+func (s *Server) deleteRun(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	run := &sympoziumv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+	}
+	if err := s.client.Delete(r.Context(), run); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Policy handlers ---
@@ -467,6 +643,11 @@ func (s *Server) getPersonaPack(w http.ResponseWriter, r *http.Request) {
 // --- WebSocket streaming ---
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if s.eventBus == nil {
+		http.Error(w, "streaming not available (no event bus)", http.StatusServiceUnavailable)
+		return
+	}
+
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.log.Error(err, "failed to upgrade websocket")

@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"io/fs"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	sympoziumv1alpha1 "github.com/alexsjones/sympozium/api/v1alpha1"
 	"github.com/alexsjones/sympozium/internal/apiserver"
 	"github.com/alexsjones/sympozium/internal/eventbus"
+	webui "github.com/alexsjones/sympozium/web"
 )
 
 var scheme = runtime.NewScheme()
@@ -31,10 +33,14 @@ func main() {
 	var addr string
 	var namespace string
 	var eventBusURL string
+	var token string
+	var serveUI bool
 
 	flag.StringVar(&addr, "addr", ":8080", "API server listen address")
 	flag.StringVar(&namespace, "namespace", "sympozium", "Sympozium namespace")
 	flag.StringVar(&eventBusURL, "event-bus-url", "nats://nats.sympozium-system.svc:4222", "Event bus URL")
+	flag.StringVar(&token, "token", os.Getenv("SYMPOZIUM_UI_TOKEN"), "Bearer token for API authentication (or set SYMPOZIUM_UI_TOKEN)")
+	flag.BoolVar(&serveUI, "serve-ui", true, "Serve the embedded web UI alongside the API")
 	flag.Parse()
 
 	log := zap.New(zap.UseDevMode(true))
@@ -80,8 +86,23 @@ func main() {
 	}
 
 	server := apiserver.NewServer(k8sClient.GetClient(), bus, log.WithName("apiserver"))
-	if err := server.Start(addr); err != nil {
-		log.Error(err, "api server failed")
-		os.Exit(1)
+
+	if serveUI {
+		// Extract the "dist" subdirectory from the embedded FS.
+		frontendFS, fsErr := fs.Sub(webui.Dist, "dist")
+		if fsErr != nil {
+			log.Error(fsErr, "failed to load embedded frontend")
+			os.Exit(1)
+		}
+		log.Info("Serving web UI", "addr", addr, "auth", token != "")
+		if err := server.StartWithUI(addr, token, frontendFS); err != nil {
+			log.Error(err, "api server failed")
+			os.Exit(1)
+		}
+	} else {
+		if err := server.Start(addr); err != nil {
+			log.Error(err, "api server failed")
+			os.Exit(1)
+		}
 	}
 }

@@ -5,6 +5,9 @@ Namespace: {{ include "sympozium.namespace" . }}
 Components:
   ✅ Controller Manager ({{ .Values.controller.replicas }} replica(s))
   ✅ API Server ({{ .Values.apiserver.replicas }} replica(s))
+{{- if .Values.apiserver.webUI.enabled }}
+  ✅ Web Dashboard (embedded in API Server)
+{{- end }}
 {{- if .Values.webhook.enabled }}
   ✅ Admission Webhook ({{ .Values.webhook.replicas }} replica(s))
 {{- end }}
@@ -27,5 +30,16 @@ Next steps:
 
   4. Open the TUI:
      sympozium
+{{- if .Values.apiserver.webUI.enabled }}
+
+  5. Open the web dashboard:
+     sympozium serve
+
+     Or port-forward manually:
+     kubectl port-forward -n {{ include "sympozium.namespace" . }} svc/sympozium-apiserver 8080:8080
+
+     Retrieve the UI token:
+     kubectl get secret {{ include "sympozium.fullname" . }}-ui-token -n {{ include "sympozium.namespace" . }} -o jsonpath='{.data.token}' | base64 -d
+{{- end }}
 
 📖 Docs: https://github.com/AlexsJones/sympozium
