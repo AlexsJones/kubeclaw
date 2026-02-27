@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { usePersonaPacks, useActivatePersonaPack, useDeletePersonaPack } from "@/hooks/use-api";
+import { usePersonaPacks, useActivatePersonaPack } from "@/hooks/use-api";
 import { StatusBadge } from "@/components/status-badge";
 import { OnboardingWizard, type WizardResult } from "@/components/onboarding-wizard";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableHeader,
@@ -15,19 +22,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { ExternalLink, Sparkles, PowerOff, Trash2 } from "lucide-react";
+import { ExternalLink, Sparkles, PowerOff } from "lucide-react";
 import { formatAge } from "@/lib/utils";
 import type { PersonaPack } from "@/lib/api";
 
 export function PersonasPage() {
   const { data, isLoading } = usePersonaPacks();
   const activatePack = useActivatePersonaPack();
-  const deletePack = useDeletePersonaPack();
   const [search, setSearch] = useState("");
 
   // Wizard state
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardPack, setWizardPack] = useState<PersonaPack | null>(null);
+
+  // Disable confirmation state
+  const [disablePack, setDisablePack] = useState<PersonaPack | null>(null);
 
   const filtered = (data || []).filter((p) =>
     p.metadata.name.toLowerCase().includes(search.toLowerCase())
@@ -63,11 +72,19 @@ export function PersonasPage() {
     );
   }
 
-  function handleToggle(pack: PersonaPack) {
-    activatePack.mutate({
-      name: pack.metadata.name,
-      enabled: !pack.spec.enabled,
-    });
+  function confirmDisable(pack: PersonaPack) {
+    setDisablePack(pack);
+  }
+
+  function handleDisable() {
+    if (!disablePack) return;
+    activatePack.mutate(
+      {
+        name: disablePack.metadata.name,
+        enabled: false,
+      },
+      { onSuccess: () => setDisablePack(null) }
+    );
   }
 
   return (
@@ -174,21 +191,13 @@ export function PersonasPage() {
                         size="sm"
                         variant="ghost"
                         className="h-7 gap-1 text-xs text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
-                        onClick={() => handleToggle(pack)}
+                        onClick={() => confirmDisable(pack)}
                         disabled={activatePack.isPending}
                       >
                         <PowerOff className="h-3 w-3" />
                         Disable
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-red-400"
-                      onClick={() => deletePack.mutate(pack.metadata.name)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -213,6 +222,33 @@ export function PersonasPage() {
         onComplete={handleComplete}
         isPending={activatePack.isPending}
       />
+
+      {/* Disable confirmation dialog */}
+      <Dialog open={!!disablePack} onOpenChange={(open) => !open && setDisablePack(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Disable Persona Pack</DialogTitle>
+            <DialogDescription>
+              This will disable <strong>{disablePack?.metadata.name}</strong> and
+              remove all associated Instances, Schedules, and resources. The pack
+              itself will remain available and can be re-enabled at any time.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDisablePack(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDisable}
+              disabled={activatePack.isPending}
+            >
+              <PowerOff className="mr-1 h-3.5 w-3.5" />
+              Disable
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
