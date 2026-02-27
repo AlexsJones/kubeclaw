@@ -46,7 +46,7 @@ Then deploy to your cluster and activate your first agents:
 ```bash
 sympozium install          # deploys CRDs, controllers, and built-in PersonaPacks
 sympozium                  # launch the TUI — go to Personas tab, press Enter to onboard
-sympozium serve            # open the web dashboard (port-forwards to the in-cluster UI)
+# (WIP): sympozium serve            # open the web dashboard (port-forwards to the in-cluster UI)
 ```
 
 Sympozium ships with **PersonaPacks** — pre-configured bundles of agents that you activate with a few keypresses. No YAML required. See [PersonaPacks](#personapacks) below.
