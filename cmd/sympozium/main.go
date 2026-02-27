@@ -8661,9 +8661,8 @@ the login URL.`,
 			}
 
 			listenAddr := fmt.Sprintf("127.0.0.1:%s", localPort)
-			svcTarget := fmt.Sprintf("svc/sympozium-apiserver:%s", "8080")
 
-			fmt.Printf("\n  Starting port-forward to %s in namespace %s...\n", svcTarget, ns)
+			fmt.Printf("\n  Starting port-forward to svc/sympozium-apiserver in namespace %s...\n", ns)
 			fmt.Printf("  ➜  Web UI:  http://%s\n", listenAddr)
 			if token != "" {
 				fmt.Printf("  ➜  Token:   %s\n", token)
@@ -8690,7 +8689,7 @@ the login URL.`,
 			// Run kubectl port-forward (blocks until Ctrl+C).
 			pf := exec.Command("kubectl", "port-forward",
 				"-n", ns,
-				svcTarget,
+				"svc/sympozium-apiserver",
 				fmt.Sprintf("%s:8080", localPort),
 			)
 			pf.Stdout = os.Stdout

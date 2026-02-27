@@ -38,6 +38,11 @@ coverage.out
 coverage.html
 main
 
+# Web UI build output (keep placeholder for go:embed)
+web/dist/*
+!web/dist/index.html
+web/node_modules/
+
 output.cast
 tmp.gif
 whatsapp
