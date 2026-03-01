@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -277,6 +278,9 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
 
 	writeJSON(w, out)
 }
