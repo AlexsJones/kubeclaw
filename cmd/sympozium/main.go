@@ -1201,9 +1201,13 @@ func runUninstall() error {
 	// Delete in reverse order.
 	manifests := []string{
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/observability/otel-collector.yaml",
+		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/cert/certificate.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/network/policies.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/webhook/manifests.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/manager/manager.yaml",
+		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/nats/nats.yaml",
+		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/rbac/role_binding.yaml",
+		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/rbac/service_account.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/rbac/role.yaml",
 	}
 	for _, m := range manifests {
@@ -1213,8 +1217,13 @@ func runUninstall() error {
 	// Strip finalizers from all Sympozium CRD instances so CRD deletion doesn't
 	// hang waiting for the (now-deleted) controller to reconcile them.
 	fmt.Println("  Removing finalizers from Sympozium resources...")
-	for _, res := range []string{"agentruns", "sympoziuminstances", "sympoziumpolicies", "skillpacks", "sympoziumschedules", "personapacks"} {
+	resources := []string{"agentruns", "sympoziuminstances", "sympoziumpolicies", "skillpacks", "sympoziumschedules", "personapacks"}
+	for _, res := range resources {
 		stripFinalizers(res)
+	}
+	fmt.Println("  Deleting Sympozium custom resources...")
+	for _, res := range resources {
+		_ = kubectl("delete", res+".sympozium.ai", "--all", "--all-namespaces", "--ignore-not-found", "--timeout=60s")
 	}
 
 	// CRDs last.
@@ -1230,6 +1239,10 @@ func runUninstall() error {
 	for _, c := range crds {
 		_ = kubectl("delete", "--ignore-not-found", "-f", crdBase+c)
 	}
+
+	// Remove the system namespace created during install.
+	fmt.Println("  Deleting namespace sympozium-system...")
+	_ = kubectl("delete", "namespace", "sympozium-system", "--ignore-not-found", "--timeout=120s")
 
 	fmt.Println("  Sympozium uninstalled.")
 	return nil

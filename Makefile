@@ -199,8 +199,44 @@ install: manifests ## Install CRDs, skills, personas, and policies into the K8s 
 	kubectl apply -f config/personas/
 	kubectl apply -f config/policies/
 
-uninstall: ## Uninstall CRDs from the K8s cluster
-	kubectl delete -f config/crd/bases/
+uninstall: ## Uninstall Sympozium control plane, CRDs, and cleanup finalizers
+	@set -eu; \
+	echo "==> Deleting Sympozium control plane manifests"; \
+	for m in \
+		config/observability/otel-collector.yaml \
+		config/cert/certificate.yaml \
+		config/network/policies.yaml \
+		config/webhook/manifests.yaml \
+		config/manager/manager.yaml \
+		config/nats/nats.yaml \
+		config/rbac/role_binding.yaml \
+		config/rbac/service_account.yaml \
+		config/rbac/role.yaml; do \
+		kubectl delete -f "$$m" --ignore-not-found >/dev/null 2>&1 || true; \
+	done; \
+	echo "==> Deleting built-in SkillPacks"; \
+	kubectl delete skillpacks.sympozium.ai --ignore-not-found -n $(SYMPOZIUM_NAMESPACE) -l sympozium.ai/builtin=true >/dev/null 2>&1 || true; \
+	for crd in \
+		personapacks.sympozium.ai \
+		sympoziuminstances.sympozium.ai \
+		sympoziumschedules.sympozium.ai \
+		sympoziumpolicies.sympozium.ai \
+		skillpacks.sympozium.ai \
+		agentruns.sympozium.ai; do \
+		if kubectl get crd "$$crd" >/dev/null 2>&1; then \
+			echo "==> Removing finalizers from $$crd instances"; \
+			kubectl get "$$crd" -A -o name 2>/dev/null | while read -r obj; do \
+				[ -n "$$obj" ] || continue; \
+				kubectl patch "$$obj" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true; \
+			done; \
+			echo "==> Deleting $$crd instances"; \
+			kubectl delete "$$crd" -A --all --ignore-not-found --timeout=60s >/dev/null 2>&1 || true; \
+		fi; \
+	done; \
+	echo "==> Deleting Sympozium CRDs"; \
+	kubectl delete -f config/crd/bases/ --ignore-not-found >/dev/null 2>&1 || true; \
+	echo "==> Deleting namespace $(SYMPOZIUM_NAMESPACE)"; \
+	kubectl delete namespace $(SYMPOZIUM_NAMESPACE) --ignore-not-found --timeout=120s >/dev/null 2>&1 || true
 
 deploy: manifests ## Deploy controller to the K8s cluster
 	kubectl apply -k config/
