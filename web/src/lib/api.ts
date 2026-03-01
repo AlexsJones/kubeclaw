@@ -494,6 +494,7 @@ export const api = {
       model: string;
       baseURL?: string;
       secretName?: string;
+      apiKey?: string;
       policyRef?: string;
       skills?: string[];
       channels?: string[];

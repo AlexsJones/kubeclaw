@@ -349,6 +349,7 @@ type CreateInstanceRequest struct {
 	Model          string            `json:"model"`
 	BaseURL        string            `json:"baseURL,omitempty"`
 	SecretName     string            `json:"secretName,omitempty"`
+	APIKey         string            `json:"apiKey,omitempty"`
 	PolicyRef      string            `json:"policyRef,omitempty"`
 	Skills         []string          `json:"skills,omitempty"`
 	Channels       []string          `json:"channels,omitempty"`
@@ -388,6 +389,44 @@ func (s *Server) createInstance(w http.ResponseWriter, r *http.Request) {
 
 	if req.BaseURL != "" {
 		inst.Spec.Agents.Default.BaseURL = req.BaseURL
+	}
+
+	// Auto-create a K8s Secret when the user provides a raw API key.
+	if req.Provider != "" && req.APIKey != "" && req.SecretName == "" {
+		req.SecretName = req.Name + "-credentials"
+		envKey := providerEnvKey(req.Provider)
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      req.SecretName,
+				Namespace: ns,
+				Labels: map[string]string{
+					"app.kubernetes.io/managed-by": "sympozium",
+					"sympozium.ai/instance":        req.Name,
+				},
+			},
+			StringData: map[string]string{envKey: req.APIKey},
+		}
+		createErr := s.client.Create(r.Context(), secret)
+		if createErr != nil && !k8serrors.IsAlreadyExists(createErr) {
+			http.Error(w, "failed to create credentials secret: "+createErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		if k8serrors.IsAlreadyExists(createErr) {
+			// Update the existing secret with the new key.
+			existing := &corev1.Secret{}
+			if err := s.client.Get(r.Context(), types.NamespacedName{Name: req.SecretName, Namespace: ns}, existing); err != nil {
+				http.Error(w, "failed to get existing secret: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if existing.Data == nil {
+				existing.Data = map[string][]byte{}
+			}
+			existing.Data[envKey] = []byte(req.APIKey)
+			if err := s.client.Update(r.Context(), existing); err != nil {
+				http.Error(w, "failed to update credentials secret: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	if req.SecretName != "" {

@@ -39,6 +39,7 @@ export function InstancesPage() {
         model: result.model,
         baseURL: result.baseURL || undefined,
         secretName: result.secretName || undefined,
+        apiKey: result.apiKey || undefined,
         skills: result.skills,
         channels: result.channels,
         channelConfigs:
