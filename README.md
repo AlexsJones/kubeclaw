@@ -1,8 +1,6 @@
 
 <p align="center">
-  <a href="https://youtu.be/6jyXNLfobjo">
-    <img src="https://img.youtube.com/vi/6jyXNLfobjo/maxresdefault.jpg" alt="Watch Sympozium demo on YouTube" width="800px;">
-  </a>
+  <img src="header.png" alt="sympozium icon" width="800px;">
 </p>
 
 <p align="center">
