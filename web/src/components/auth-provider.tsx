@@ -3,9 +3,15 @@ import {
   useContext,
   useState,
   useEffect,
+  useCallback,
   type ReactNode,
 } from "react";
-import { getToken, setToken, clearToken } from "@/lib/api";
+import {
+  getToken,
+  setToken,
+  clearToken,
+  AUTH_UNAUTHORIZED_EVENT,
+} from "@/lib/api";
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -24,18 +30,25 @@ const AuthContext = createContext<AuthContextType>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(getToken());
 
+  const logout = useCallback(() => {
+    clearToken();
+    setTokenState(null);
+  }, []);
+
   useEffect(() => {
     setTokenState(getToken());
   }, []);
 
+  useEffect(() => {
+    const onUnauthorized = () => logout();
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
+    return () =>
+      window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [logout]);
+
   const login = (newToken: string) => {
     setToken(newToken);
     setTokenState(newToken);
-  };
-
-  const logout = () => {
-    clearToken();
-    setTokenState(null);
   };
 
   return (

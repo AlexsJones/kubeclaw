@@ -229,12 +229,16 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 	// Check Job completion
 	if job.Status.Succeeded > 0 {
 		// Extract the LLM response from pod logs before the pod is gone.
-		result, usage := r.extractResultFromPod(ctx, log, agentRun)
+		result, _, usage := r.extractResultFromPod(ctx, log, agentRun)
 		// Extract and persist memory updates if applicable.
 		r.extractAndPersistMemory(ctx, log, agentRun)
 		return r.succeedRun(ctx, agentRun, result, usage)
 	}
 	if job.Status.Failed > 0 {
+		_, podErr, _ := r.extractResultFromPod(ctx, log, agentRun)
+		if podErr != "" {
+			return ctrl.Result{}, r.failRun(ctx, agentRun, podErr)
+		}
 		return ctrl.Result{}, r.failRun(ctx, agentRun, "Job failed")
 	}
 
@@ -249,7 +253,7 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 		if done, exitCode, reason, hasSidecars := r.checkAgentContainer(ctx, log, agentRun); done && hasSidecars {
 			if exitCode == 0 {
 				log.Info("Agent container terminated successfully; cleaning up lingering sidecars")
-				result, usage := r.extractResultFromPod(ctx, log, agentRun)
+				result, _, usage := r.extractResultFromPod(ctx, log, agentRun)
 				r.extractAndPersistMemory(ctx, log, agentRun)
 				// Delete the Job so Kubernetes kills remaining sidecar containers.
 				_ = r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
@@ -261,7 +265,7 @@ func (r *AgentRunReconciler) reconcileRunning(ctx context.Context, log logr.Logg
 			}
 			log.Info("Agent container terminated with error; cleaning up", "exitCode", exitCode, "reason", reason)
 			// Try to extract the error from pod logs before cleaning up.
-			if logErr, _ := r.extractResultFromPod(ctx, log, agentRun); logErr != "" {
+			if _, logErr, _ := r.extractResultFromPod(ctx, log, agentRun); logErr != "" {
 				errMsg = logErr
 			}
 			_ = r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
@@ -920,12 +924,14 @@ const (
 
 // extractResultFromPod reads the agent container logs and looks for the
 // structured result marker written by agent-runner.
-func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.Logger, agentRun *sympoziumv1alpha1.AgentRun) (string, *sympoziumv1alpha1.TokenUsage) {
+// Returns (result, errorMessage, tokenUsage). For failed runs, errorMessage is
+// populated from the structured marker when available.
+func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.Logger, agentRun *sympoziumv1alpha1.AgentRun) (string, string, *sympoziumv1alpha1.TokenUsage) {
 	if r.Clientset == nil || agentRun.Status.PodName == "" {
-		return "", nil
+		return "", "", nil
 	}
 
-	tailLines := int64(20)
+	tailLines := int64(80)
 	opts := &corev1.PodLogOptions{
 		Container: "agent",
 		TailLines: &tailLines,
@@ -934,25 +940,33 @@ func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		log.V(1).Info("could not read pod logs for result", "err", err)
-		return "", nil
+		return "", "", nil
 	}
 	defer stream.Close()
 
 	raw, err := io.ReadAll(stream)
 	if err != nil {
 		log.V(1).Info("error reading pod logs", "err", err)
-		return "", nil
+		return "", "", nil
 	}
 
-	logs := string(raw)
+	return parseAgentResultFromLogs(string(raw), log)
+}
+
+// parseAgentResultFromLogs parses the structured result marker emitted by the
+// agent-runner and extracts either the success response or the failure message.
+func parseAgentResultFromLogs(logs string, log logr.Logger) (string, string, *sympoziumv1alpha1.TokenUsage) {
 	startIdx := strings.LastIndex(logs, resultMarkerStart)
 	if startIdx < 0 {
-		return "", nil
+		if fallbackErr := extractLikelyProviderErrorFromLogs(logs); fallbackErr != "" {
+			return "", fallbackErr, nil
+		}
+		return "", "", nil
 	}
 	payload := logs[startIdx+len(resultMarkerStart):]
 	endIdx := strings.Index(payload, resultMarkerEnd)
 	if endIdx < 0 {
-		return "", nil
+		return "", "", nil
 	}
 	jsonStr := strings.TrimSpace(payload[:endIdx])
 
@@ -960,6 +974,7 @@ func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.
 	var parsed struct {
 		Status   string `json:"status"`
 		Response string `json:"response"`
+		Error    string `json:"error"`
 		Metrics  struct {
 			DurationMs   int64 `json:"durationMs"`
 			InputTokens  int   `json:"inputTokens"`
@@ -969,10 +984,7 @@ func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
 		log.V(1).Info("could not parse result JSON", "err", err)
-		return jsonStr, nil // Return raw JSON as fallback.
-	}
-	if parsed.Status == "error" {
-		return "", nil
+		return "", "", nil
 	}
 
 	var usage *sympoziumv1alpha1.TokenUsage
@@ -992,7 +1004,52 @@ func (r *AgentRunReconciler) extractResultFromPod(ctx context.Context, log logr.
 			"durationMs", usage.DurationMs)
 	}
 
-	return parsed.Response, usage
+	if parsed.Status == "error" {
+		msg := strings.TrimSpace(parsed.Error)
+		if msg == "" {
+			msg = "agent run failed"
+		}
+		return "", msg, nil
+	}
+
+	return parsed.Response, "", usage
+}
+
+// extractLikelyProviderErrorFromLogs scans plain log lines for provider quota
+// and rate-limit failures when no structured marker can be parsed.
+func extractLikelyProviderErrorFromLogs(logs string) string {
+	lines := strings.Split(logs, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		has429 := strings.Contains(lower, "http 429") ||
+			strings.Contains(lower, "status 429") ||
+			strings.Contains(lower, "status code: 429") ||
+			strings.Contains(lower, "(429)") ||
+			strings.Contains(lower, " 429 ")
+		hasQuotaSignal := strings.Contains(lower, "insufficient_quota") ||
+			strings.Contains(lower, "quota") ||
+			strings.Contains(lower, "rate limit") ||
+			strings.Contains(lower, "too many requests")
+		if has429 || hasQuotaSignal {
+			return truncateForStatus(line, 500)
+		}
+	}
+	return ""
+}
+
+func truncateForStatus(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
 
 const (

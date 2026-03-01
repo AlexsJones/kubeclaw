@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -337,6 +340,66 @@ func TestBuildVolumes_IPCUsesMemory(t *testing.T) {
 		}
 	}
 	t.Error("ipc volume not found")
+}
+
+// ── result parsing tests ─────────────────────────────────────────────────────
+
+func TestParseAgentResultFromLogs_Success(t *testing.T) {
+	logs := "noise\n" +
+		"__SYMPOZIUM_RESULT__" +
+		`{"status":"success","response":"all good","metrics":{"durationMs":1200,"inputTokens":10,"outputTokens":20,"toolCalls":1}}` +
+		"__SYMPOZIUM_END__\n"
+
+	result, errMsg, usage := parseAgentResultFromLogs(logs, logr.Discard())
+	if errMsg != "" {
+		t.Fatalf("unexpected error message: %q", errMsg)
+	}
+	if result != "all good" {
+		t.Fatalf("result = %q, want %q", result, "all good")
+	}
+	if usage == nil {
+		t.Fatal("expected token usage, got nil")
+	}
+	if usage.TotalTokens != 30 {
+		t.Fatalf("total tokens = %d, want 30", usage.TotalTokens)
+	}
+}
+
+func TestParseAgentResultFromLogs_Error(t *testing.T) {
+	want := "OpenAI API error (HTTP 429): insufficient_quota"
+	logs := "__SYMPOZIUM_RESULT__" +
+		fmt.Sprintf(`{"status":"error","error":%q,"metrics":{"durationMs":123}}`, want) +
+		"__SYMPOZIUM_END__\n"
+
+	result, errMsg, usage := parseAgentResultFromLogs(logs, logr.Discard())
+	if result != "" {
+		t.Fatalf("expected empty result, got %q", result)
+	}
+	if errMsg != want {
+		t.Fatalf("error = %q, want %q", errMsg, want)
+	}
+	if usage != nil {
+		t.Fatalf("expected nil usage on error, got %+v", usage)
+	}
+}
+
+func TestExtractLikelyProviderErrorFromLogs_Quota(t *testing.T) {
+	logs := `
+2026/03/01 12:00:00 agent-runner starting
+2026/03/01 12:00:01 LLM call failed: Anthropic API error (HTTP 429): {"type":"error","error":{"type":"rate_limit_error","message":"You have run out of credits"}}
+2026/03/01 12:00:01 agent-runner finished with error
+`
+	got := extractLikelyProviderErrorFromLogs(logs)
+	if got == "" {
+		t.Fatal("expected quota/rate-limit message, got empty")
+	}
+	if want := "HTTP 429"; !containsIgnoreCase(got, want) {
+		t.Fatalf("message %q does not contain %q", got, want)
+	}
+}
+
+func containsIgnoreCase(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }
 
 func TestBuildVolumes_SkillsWithRefs(t *testing.T) {

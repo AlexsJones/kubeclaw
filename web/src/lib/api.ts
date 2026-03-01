@@ -355,6 +355,7 @@ export class ApiError extends Error {
 
 const TOKEN_KEY = "sympozium_token";
 const NS_KEY = "sympozium_namespace";
+export const AUTH_UNAUTHORIZED_EVENT = "sympozium:auth-unauthorized";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -366,6 +367,11 @@ export function setToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+function handleUnauthorized() {
+  clearToken();
+  window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
 }
 
 export function getNamespace(): string {
@@ -402,6 +408,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       const res = await fetch(url, { ...init, headers });
       if (res.status === 401) {
+        handleUnauthorized();
         throw new ApiError("Unauthorized", 401);
       }
       if (res.status === 204) return undefined as T;
