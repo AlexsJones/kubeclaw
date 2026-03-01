@@ -1136,6 +1136,18 @@ func runInstall(ver, imageTag string) error {
 			// Non-fatal — the control plane should still come up.
 			fmt.Printf("  Warning: failed to deploy OpenTelemetry collector: %v\n", err)
 		}
+	} else {
+		// Older release bundles may not include config/observability.
+		// Fall back to a version-pinned raw manifest so telemetry works by default.
+		observabilityURL := fmt.Sprintf(
+			"https://raw.githubusercontent.com/%s/%s/config/observability/otel-collector.yaml",
+			ghRepo, ver,
+		)
+		fmt.Println("  Observability manifests missing in bundle; applying collector fallback...")
+		if err := kubectl("apply", "-f", observabilityURL); err != nil {
+			// Non-fatal — telemetry should not block installation.
+			fmt.Printf("  Warning: failed to deploy OpenTelemetry collector fallback: %v\n", err)
+		}
 	}
 
 	// Install default SkillPacks into sympozium-system.
