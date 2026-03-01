@@ -55,6 +55,8 @@ sympozium                  # launch the TUI — go to Personas tab, press Enter 
 # (WIP): sympozium serve            # open the web dashboard (port-forwards to the in-cluster UI)
 ```
 
+`sympozium install` now also deploys a built-in OpenTelemetry collector (`sympozium-otel-collector`) so telemetry and dashboard observability features are available by default.
+
 Sympozium ships with **PersonaPacks** — pre-configured bundles of agents that you activate with a few keypresses. No YAML required. See [PersonaPacks](#personapacks) below.
 
 Choose your interface: a **k9s-style terminal UI** (`sympozium`) or a **full web dashboard** (`sympozium serve`). Both support all operations.
@@ -78,6 +80,25 @@ helm install sympozium ./charts/sympozium
 ```
 
 See [`charts/sympozium/values.yaml`](charts/sympozium/values.yaml) for configuration options (replicas, resources, external NATS, network policies, etc.).
+
+By default, the Helm chart also deploys a built-in OpenTelemetry collector:
+
+```yaml
+observability:
+  enabled: true
+  collector:
+    service:
+      otlpGrpcPort: 4317
+      otlpHttpPort: 4318
+      metricsPort: 8889
+```
+
+Disable it if you already run a shared collector:
+
+```yaml
+observability:
+  enabled: false
+```
 
 #### CLI
 
@@ -130,7 +151,7 @@ This means you can give an agent full `kubectl` access for a troubleshooting run
 | **Multi-tenancy** | Single-instance file lock | **Namespaced CRDs**, RBAC, NetworkPolicy |
 | **Scaling** | Vertical only | **Horizontal** — stateless control plane, HPA |
 | **Channel connections** | In-process per channel | Dedicated **Deployment** per channel type |
-| **Observability** | Application logs | `kubectl logs`, events, conditions, **k9s-style TUI**, **web dashboard** |
+| **Observability** | Application logs | `kubectl logs`, events, conditions, **OpenTelemetry traces/metrics**, **k9s-style TUI**, **web dashboard** |
 
 The result: every concept that OpenClaw manages in application code, Sympozium expresses as a Kubernetes resource — then adds the ability to point agents at the cluster itself. Declarative, reconcilable, observable, and scalable.
 
@@ -482,6 +503,37 @@ Options:
 | `--service-namespace` | `sympozium-system` | Namespace of the apiserver service |
 
 The token is auto-generated during `sympozium install` and stored in a Kubernetes Secret. You can also set it explicitly via Helm (`apiserver.webUI.token`) or by creating a `sympozium-ui-token` Secret.
+
+## OpenTelemetry Observability
+
+Sympozium supports OpenTelemetry for agent runs and tool execution. The built-in collector is installed by default with `sympozium install` and enabled by default in the Helm chart.
+
+### Instance-Level Configuration
+
+Enable observability per `SympoziumInstance`:
+
+```yaml
+apiVersion: sympozium.ai/v1alpha1
+kind: SympoziumInstance
+metadata:
+  name: my-agent
+spec:
+  observability:
+    enabled: true
+    otlpEndpoint: sympozium-otel-collector.sympozium-system.svc:4317
+    otlpProtocol: grpc
+    serviceName: sympozium
+    resourceAttributes:
+      deployment.environment: production
+      k8s.cluster.name: my-cluster
+```
+
+### Web UI Observability Views
+
+- **Runs page** (`/runs`): collector status, run totals, token totals, tool-invocation totals, model token breakdown.
+- **Run detail** (`/runs/<name>`) → **Telemetry tab**: run timeline events, trace correlation fields, and observed telemetry metric names.
+
+For full distributed trace waterfall views, configure collector exporters to your preferred backend (Jaeger, Tempo, Datadog, Honeycomb, etc.).
 
 ## Interactive TUI
 

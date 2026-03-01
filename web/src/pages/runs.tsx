@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useRuns, useDeleteRun, useCreateRun, useInstances } from "@/hooks/use-api";
+import {
+  useRuns,
+  useDeleteRun,
+  useCreateRun,
+  useInstances,
+  useObservabilityMetrics,
+} from "@/hooks/use-api";
 import { StatusBadge } from "@/components/status-badge";
 import {
   Table,
@@ -32,10 +38,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Trash2, ExternalLink } from "lucide-react";
 import { formatAge, truncate } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function RunsPage() {
   const { data, isLoading } = useRuns();
   const instances = useInstances();
+  const observability = useObservabilityMetrics();
   const deleteRun = useDeleteRun();
   const createRun = useCreateRun();
   const [open, setOpen] = useState(false);
@@ -166,6 +174,79 @@ export function RunsPage() {
         onChange={(e) => setSearch(e.target.value)}
         className="max-w-sm"
       />
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Collector</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-semibold">
+              {observability.data?.collectorReachable ? "Connected" : "Unavailable"}
+            </p>
+            {observability.data?.collectorError && (
+              <p className="mt-1 text-xs text-destructive">{observability.data.collectorError}</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Agent Runs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-semibold">
+              {(observability.data?.agentRunsTotal || 0).toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Token Usage</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm font-mono">
+              {(observability.data?.inputTokensTotal || 0).toLocaleString()} in /{" "}
+              {(observability.data?.outputTokensTotal || 0).toLocaleString()} out
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-muted-foreground">Tool Calls</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xl font-semibold">
+              {(observability.data?.toolInvocations || 0).toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {observability.data?.inputByModel?.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Model Token Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-2 md:grid-cols-2">
+              {observability.data.inputByModel.slice(0, 6).map((row) => {
+                const out = observability.data?.outputByModel?.find(
+                  (x) => x.label === row.label
+                )?.value || 0;
+                return (
+                  <div key={row.label} className="rounded border p-3">
+                    <p className="text-xs text-muted-foreground">{row.label}</p>
+                    <p className="font-mono text-sm">
+                      {Math.round(row.value).toLocaleString()} in /{" "}
+                      {Math.round(out).toLocaleString()} out
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {isLoading ? (
         <div className="space-y-2">

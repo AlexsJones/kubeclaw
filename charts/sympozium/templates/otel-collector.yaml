@@ -1,0 +1,144 @@
+{{- if .Values.observability.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sympozium-otel-collector-config
+  namespace: {{ include "sympozium.namespace" . }}
+  labels:
+    {{- include "sympozium.labels" . | nindent 4 }}
+    app.kubernetes.io/component: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:{{ .Values.observability.collector.service.otlpGrpcPort }}
+          http:
+            endpoint: 0.0.0.0:{{ .Values.observability.collector.service.otlpHttpPort }}
+
+    processors:
+      batch: {}
+
+    exporters:
+      debug:
+        verbosity: normal
+      prometheus:
+        endpoint: 0.0.0.0:{{ .Values.observability.collector.service.metricsPort }}
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:{{ .Values.observability.collector.service.healthPort }}
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [prometheus, debug]
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sympozium-otel-collector
+  namespace: {{ include "sympozium.namespace" . }}
+  labels:
+    {{- include "sympozium.labels" . | nindent 4 }}
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sympozium-otel-collector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sympozium-otel-collector
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: observability
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.observability.collector.image.repository }}:{{ .Values.observability.collector.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config=/conf/config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: {{ .Values.observability.collector.service.otlpGrpcPort }}
+            - name: otlp-http
+              containerPort: {{ .Values.observability.collector.service.otlpHttpPort }}
+            - name: prom-metrics
+              containerPort: {{ .Values.observability.collector.service.metricsPort }}
+            - name: health
+              containerPort: {{ .Values.observability.collector.service.healthPort }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.observability.collector.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: sympozium-otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sympozium-otel-collector
+  namespace: {{ include "sympozium.namespace" . }}
+  labels:
+    {{- include "sympozium.labels" . | nindent 4 }}
+    app.kubernetes.io/component: observability
+spec:
+  selector:
+    app.kubernetes.io/name: sympozium-otel-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.observability.collector.service.otlpGrpcPort }}
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: {{ .Values.observability.collector.service.otlpHttpPort }}
+      targetPort: otlp-http
+      protocol: TCP
+    - name: prom-metrics
+      port: {{ .Values.observability.collector.service.metricsPort }}
+      targetPort: prom-metrics
+      protocol: TCP
+{{- end }}

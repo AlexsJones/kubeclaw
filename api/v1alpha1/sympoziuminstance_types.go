@@ -32,6 +32,10 @@ type SympoziumInstanceSpec struct {
 	// When enabled, a MEMORY.md ConfigMap is managed and mounted into agent pods.
 	// +optional
 	Memory *MemorySpec `json:"memory,omitempty"`
+
+	// Observability configures OpenTelemetry exports for runs of this instance.
+	// +optional
+	Observability *ObservabilitySpec `json:"observability,omitempty"`
 }
 
 // MemorySpec configures persistent memory for a SympoziumInstance.
@@ -49,6 +53,32 @@ type MemorySpec struct {
 	// to instruct the agent on how to use memory.
 	// +optional
 	SystemPrompt string `json:"systemPrompt,omitempty"`
+}
+
+// ObservabilitySpec configures OpenTelemetry for agent runs.
+type ObservabilitySpec struct {
+	// Enabled turns OpenTelemetry tracing/metrics on for this instance.
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// OTLPEndpoint is the collector endpoint (for example:
+	// "otel-collector.observability.svc:4317" for gRPC or
+	// "http://otel-collector.observability.svc:4318" for HTTP/protobuf).
+	// +optional
+	OTLPEndpoint string `json:"otlpEndpoint,omitempty"`
+
+	// OTLPProtocol is "grpc" or "http/protobuf".
+	// +kubebuilder:validation:Enum=grpc;http/protobuf
+	// +optional
+	OTLPProtocol string `json:"otlpProtocol,omitempty"`
+
+	// ServiceName overrides the OTel service name (default: "sympozium-agent-runner").
+	// +optional
+	ServiceName string `json:"serviceName,omitempty"`
+
+	// ResourceAttributes are additional OTel resource attributes (key/value).
+	// +optional
+	ResourceAttributes map[string]string `json:"resourceAttributes,omitempty"`
 }
 
 // ChannelSpec defines a channel connection.

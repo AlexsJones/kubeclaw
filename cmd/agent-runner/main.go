@@ -17,6 +17,8 @@ import (
 	"github.com/openai/openai-go/v3/azure"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // maxToolIterations is the maximum number of tool-call round-trips before
@@ -134,6 +136,29 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
+	obs := initObservability(ctx)
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := obs.shutdown(shutdownCtx); err != nil {
+			log.Printf("failed to shutdown OTel providers: %v", err)
+		}
+	}()
+
+	ctx, runSpan := obs.startRunSpan(ctx,
+		attribute.String("instance", getEnv("INSTANCE_NAME", "")),
+		attribute.String("tenant.namespace", getEnv("AGENT_NAMESPACE", "")),
+		attribute.String("model", modelName),
+		attribute.String("task.summary", truncate(task, 200)),
+	)
+	writeTraceContextMetadata(ctx)
+	logWithTrace(ctx, "info", "agent run started", map[string]any{
+		"instance":  getEnv("INSTANCE_NAME", ""),
+		"namespace": getEnv("AGENT_NAMESPACE", ""),
+		"provider":  provider,
+		"model":     modelName,
+	})
+
 	start := time.Now()
 
 	var (
@@ -164,12 +189,20 @@ func main() {
 		log.Printf("LLM call failed: %v", err)
 		res.Status = "error"
 		res.Error = err.Error()
+		markSpanError(runSpan, err)
+		runSpan.SetStatus(codes.Error, err.Error())
 	} else {
 		log.Printf("LLM call succeeded (tokens: in=%d out=%d, tool_calls=%d)", inputTokens, outputTokens, toolCalls)
 		res.Status = "success"
 		res.Response = responseText
 		res.Metrics.InputTokens = inputTokens
 		res.Metrics.OutputTokens = outputTokens
+		runSpan.SetAttributes(
+			attribute.Int("gen_ai.usage.input_tokens", inputTokens),
+			attribute.Int("gen_ai.usage.output_tokens", outputTokens),
+			attribute.Int("gen_ai.tool.call.count", toolCalls),
+		)
+		runSpan.SetStatus(codes.Ok, "")
 	}
 
 	// Extract and emit memory update before stripping markers from the response.
@@ -206,9 +239,20 @@ func main() {
 	}
 
 	if res.Status == "error" {
+		obs.recordRunMetrics(ctx, "error", getEnv("INSTANCE_NAME", ""), modelName, getEnv("AGENT_NAMESPACE", ""), elapsed.Milliseconds(), inputTokens, outputTokens)
+		logWithTrace(ctx, "error", "agent run failed", map[string]any{"error": res.Error})
+		runSpan.End()
 		log.Printf("agent-runner finished with error: %s", res.Error)
 		os.Exit(1)
 	}
+	obs.recordRunMetrics(ctx, "success", getEnv("INSTANCE_NAME", ""), modelName, getEnv("AGENT_NAMESPACE", ""), elapsed.Milliseconds(), inputTokens, outputTokens)
+	logWithTrace(ctx, "info", "agent run succeeded", map[string]any{
+		"duration_ms":   elapsed.Milliseconds(),
+		"input_tokens":  inputTokens,
+		"output_tokens": outputTokens,
+		"tool_calls":    toolCalls,
+	})
+	runSpan.End()
 	log.Println("agent-runner finished successfully")
 }
 
@@ -264,8 +308,14 @@ func callAnthropic(ctx context.Context, apiKey, baseURL, model, systemPrompt, ta
 			params.Tools = anthropicTools
 		}
 
-		message, err := client.Messages.New(ctx, params)
+		chatCtx, chatSpan := obs.startChatSpan(ctx,
+			attribute.String("gen_ai.system", "anthropic"),
+			attribute.String("gen_ai.request.model", model),
+		)
+		message, err := client.Messages.New(chatCtx, params)
 		if err != nil {
+			markSpanError(chatSpan, err)
+			chatSpan.End()
 			var apiErr *anthropic.Error
 			if errors.As(err, &apiErr) {
 				return "", totalInputTokens, totalOutputTokens, totalToolCalls,
@@ -277,6 +327,13 @@ func callAnthropic(ctx context.Context, apiKey, baseURL, model, systemPrompt, ta
 
 		totalInputTokens += int(message.Usage.InputTokens)
 		totalOutputTokens += int(message.Usage.OutputTokens)
+		chatSpan.SetAttributes(
+			attribute.Int("gen_ai.usage.input_tokens", int(message.Usage.InputTokens)),
+			attribute.Int("gen_ai.usage.output_tokens", int(message.Usage.OutputTokens)),
+			attribute.String("gen_ai.response.finish_reasons", string(message.StopReason)),
+		)
+		chatSpan.SetStatus(codes.Ok, "")
+		chatSpan.End()
 
 		// Separate text blocks and tool-use blocks.
 		var textContent strings.Builder
@@ -314,7 +371,7 @@ func callAnthropic(ctx context.Context, apiKey, baseURL, model, systemPrompt, ta
 			totalToolCalls++
 			log.Printf("tool_use [%d]: %s id=%s", totalToolCalls, tu.Name, tu.ID)
 
-			result := executeToolCall(tu.Name, string(tu.Input))
+			result := executeToolCallWithTelemetry(ctx, tu.Name, string(tu.Input), tu.ID)
 			isErr := strings.HasPrefix(result, "Error:")
 			resultBlocks = append(resultBlocks, anthropic.NewToolResultBlock(tu.ID, result, isErr))
 		}
@@ -385,8 +442,14 @@ func callOpenAI(ctx context.Context, provider, apiKey, baseURL, model, systemPro
 			params.Tools = oaiTools
 		}
 
-		completion, err := client.Chat.Completions.New(ctx, params)
+		chatCtx, chatSpan := obs.startChatSpan(ctx,
+			attribute.String("gen_ai.system", provider),
+			attribute.String("gen_ai.request.model", model),
+		)
+		completion, err := client.Chat.Completions.New(chatCtx, params)
 		if err != nil {
+			markSpanError(chatSpan, err)
+			chatSpan.End()
 			var apiErr *openai.Error
 			if errors.As(err, &apiErr) {
 				return "", totalInputTokens, totalOutputTokens, totalToolCalls,
@@ -398,12 +461,21 @@ func callOpenAI(ctx context.Context, provider, apiKey, baseURL, model, systemPro
 
 		totalInputTokens += int(completion.Usage.PromptTokens)
 		totalOutputTokens += int(completion.Usage.CompletionTokens)
+		chatSpan.SetAttributes(
+			attribute.Int("gen_ai.usage.input_tokens", int(completion.Usage.PromptTokens)),
+			attribute.Int("gen_ai.usage.output_tokens", int(completion.Usage.CompletionTokens)),
+		)
 
 		if len(completion.Choices) == 0 {
+			markSpanError(chatSpan, fmt.Errorf("no choices in completion response"))
+			chatSpan.End()
 			return "", totalInputTokens, totalOutputTokens, totalToolCalls,
 				fmt.Errorf("no choices in completion response")
 		}
 		choice := completion.Choices[0]
+		chatSpan.SetAttributes(attribute.String("gen_ai.response.finish_reasons", choice.FinishReason))
+		chatSpan.SetStatus(codes.Ok, "")
+		chatSpan.End()
 
 		// If model made tool calls, execute them and loop.
 		if choice.FinishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
@@ -416,7 +488,7 @@ func callOpenAI(ctx context.Context, provider, apiKey, baseURL, model, systemPro
 				totalToolCalls++
 				log.Printf("tool_call [%d]: %s id=%s", totalToolCalls, fc.Function.Name, fc.ID)
 
-				result := executeToolCall(fc.Function.Name, fc.Function.Arguments)
+				result := executeToolCallWithTelemetry(ctx, fc.Function.Name, fc.Function.Arguments, fc.ID)
 				messages = append(messages, openai.ToolMessage(result, fc.ID))
 			}
 			continue

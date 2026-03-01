@@ -73,6 +73,15 @@ export function useRun(name: string) {
   });
 }
 
+export function useRunTelemetry(name: string) {
+  return useQuery({
+    queryKey: ["runs", name, "telemetry"],
+    queryFn: () => api.runs.telemetry(name),
+    enabled: !!name,
+    refetchInterval: 5000,
+  });
+}
+
 export function useCreateRun() {
   const qc = useQueryClient();
   return useMutation({
@@ -253,4 +262,12 @@ export function useInstallDefaultPersonaPacks() {
 
 export function usePods() {
   return useQuery({ queryKey: ["pods"], queryFn: api.pods.list });
+}
+
+export function useObservabilityMetrics() {
+  return useQuery({
+    queryKey: ["observability", "metrics"],
+    queryFn: api.observability.metrics,
+    refetchInterval: 10000,
+  });
 }

@@ -342,6 +342,48 @@ export interface PodInfo {
   labels?: Record<string, string>;
 }
 
+export interface RunTraceEvent {
+  time?: string;
+  level?: string;
+  message?: string;
+  traceId?: string;
+  spanId?: string;
+  fields?: Record<string, unknown>;
+}
+
+export interface RunTelemetryResponse {
+  runName: string;
+  namespace: string;
+  podName?: string;
+  phase?: string;
+  traceIds?: string[];
+  events?: RunTraceEvent[];
+  spanNames?: string[];
+  metricNames?: string[];
+  collectorSample?: string[];
+}
+
+export interface MetricBreakdown {
+  label: string;
+  value: number;
+}
+
+export interface ObservabilityMetricsResponse {
+  collectorReachable: boolean;
+  collectorError?: string;
+  collectedAt: string;
+  namespace: string;
+  agentRunsTotal: number;
+  inputTokensTotal: number;
+  outputTokensTotal: number;
+  toolInvocations: number;
+  runStatus?: Record<string, number>;
+  inputByModel?: MetricBreakdown[];
+  outputByModel?: MetricBreakdown[];
+  toolsByName?: MetricBreakdown[];
+  rawMetricNames?: string[];
+}
+
 // ── API client ───────────────────────────────────────────────────────────────
 
 /** Typed error so callers can inspect the HTTP status code. */
@@ -466,6 +508,8 @@ export const api = {
   runs: {
     list: () => apiFetch<AgentRun[]>("/api/v1/runs"),
     get: (name: string) => apiFetch<AgentRun>(`/api/v1/runs/${name}`),
+    telemetry: (name: string) =>
+      apiFetch<RunTelemetryResponse>(`/api/v1/runs/${name}/telemetry`),
     create: (data: {
       instanceRef: string;
       task: string;
@@ -554,5 +598,10 @@ export const api = {
 
   namespaces: {
     list: () => apiFetch<string[]>("/api/v1/namespaces"),
+  },
+
+  observability: {
+    metrics: () =>
+      apiFetch<ObservabilityMetricsResponse>("/api/v1/observability/metrics"),
   },
 };

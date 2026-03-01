@@ -237,6 +237,40 @@ spec:
                 required:
                 - enabled
                 type: object
+              observability:
+                description: Observability configures OpenTelemetry exports for runs
+                  of this instance.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled turns OpenTelemetry tracing/metrics on for
+                      this instance.
+                    type: boolean
+                  otlpEndpoint:
+                    description: |-
+                      OTLPEndpoint is the collector endpoint (for example:
+                      "otel-collector.observability.svc:4317" for gRPC or
+                      "http://otel-collector.observability.svc:4318" for HTTP/protobuf).
+                    type: string
+                  otlpProtocol:
+                    description: OTLPProtocol is "grpc" or "http/protobuf".
+                    enum:
+                    - grpc
+                    - http/protobuf
+                    type: string
+                  resourceAttributes:
+                    additionalProperties:
+                      type: string
+                    description: ResourceAttributes are additional OTel resource attributes
+                      (key/value).
+                    type: object
+                  serviceName:
+                    description: 'ServiceName overrides the OTel service name (default:
+                      "sympozium-agent-runner").'
+                    type: string
+                required:
+                - enabled
+                type: object
               policyRef:
                 description: PolicyRef references the SympoziumPolicy that applies
                   to this instance.

@@ -949,6 +949,14 @@ spec:
   memory:
     enabled: true
     maxSizeKB: 256
+  observability:
+    enabled: true
+    otlpEndpoint: sympozium-otel-collector.sympozium-system.svc:4317
+    otlpProtocol: grpc
+    serviceName: sympozium
+    resourceAttributes:
+      deployment.environment: cluster
+      k8s.cluster.name: unknown
 `, name, ns, channelsBlock, model, baseURLLine, authRefsBlock, policyBlock)
 }
 
@@ -1120,6 +1128,16 @@ func runInstall(ver, imageTag string) error {
 		return err
 	}
 
+	// Deploy built-in OpenTelemetry collector for observability.
+	observabilityDir := filepath.Join(tmpDir, "config/observability/")
+	if _, err := os.Stat(observabilityDir); err == nil {
+		fmt.Println("  Deploying OpenTelemetry collector...")
+		if err := kubectl("apply", "-f", observabilityDir); err != nil {
+			// Non-fatal — the control plane should still come up.
+			fmt.Printf("  Warning: failed to deploy OpenTelemetry collector: %v\n", err)
+		}
+	}
+
 	// Install default SkillPacks into sympozium-system.
 	skillsDir := filepath.Join(tmpDir, "config/skills/")
 	if _, err := os.Stat(skillsDir); err == nil {
@@ -1182,6 +1200,7 @@ func runUninstall() error {
 
 	// Delete in reverse order.
 	manifests := []string{
+		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/observability/otel-collector.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/network/policies.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/webhook/manifests.yaml",
 		"https://raw.githubusercontent.com/" + ghRepo + "/main/config/manager/manager.yaml",
@@ -8494,6 +8513,17 @@ func tuiOnboardApply(ns string, w *wizardState) (string, error) {
 	inst.Spec.Memory = &sympoziumv1alpha1.MemorySpec{
 		Enabled:   true,
 		MaxSizeKB: 256,
+	}
+	// Observability is on by default so runs appear in telemetry backends.
+	inst.Spec.Observability = &sympoziumv1alpha1.ObservabilitySpec{
+		Enabled:      true,
+		OTLPEndpoint: "sympozium-otel-collector.sympozium-system.svc:4317",
+		OTLPProtocol: "grpc",
+		ServiceName:  "sympozium",
+		ResourceAttributes: map[string]string{
+			"deployment.environment": "cluster",
+			"k8s.cluster.name":       "unknown",
+		},
 	}
 
 	// Try create; if it exists, update.

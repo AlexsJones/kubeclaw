@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -193,7 +194,7 @@ func defaultTools() []ToolDef {
 }
 
 // executeToolCall dispatches a tool call and returns the result string.
-func executeToolCall(name string, argsJSON string) string {
+func executeToolCall(ctx context.Context, name string, argsJSON string) string {
 	log.Printf("tool call: %s args=%s", name, truncateStr(argsJSON, 200))
 
 	var args map[string]any
@@ -203,7 +204,7 @@ func executeToolCall(name string, argsJSON string) string {
 
 	switch name {
 	case ToolExecuteCommand:
-		return executeCommand(args)
+		return executeCommand(ctx, args)
 	case ToolReadFile:
 		return readFileTool(args)
 	case ToolWriteFile:
@@ -601,11 +602,12 @@ func writeFileTool(args map[string]any) string {
 
 // execRequest matches the IPC ExecRequest protocol.
 type execRequest struct {
-	ID      string   `json:"id"`
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	WorkDir string   `json:"workDir,omitempty"`
-	Timeout int      `json:"timeout,omitempty"`
+	ID      string            `json:"id"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	WorkDir string            `json:"workDir,omitempty"`
+	Timeout int               `json:"timeout,omitempty"`
+	Meta    map[string]string `json:"_meta,omitempty"`
 }
 
 // execResult matches the IPC ExecResult protocol.
@@ -617,7 +619,7 @@ type execResult struct {
 	TimedOut bool   `json:"timedOut,omitempty"`
 }
 
-func executeCommand(args map[string]any) string {
+func executeCommand(ctx context.Context, args map[string]any) string {
 	command, _ := args["command"].(string)
 	if command == "" {
 		return "Error: 'command' is required"
@@ -645,6 +647,7 @@ func executeCommand(args map[string]any) string {
 		WorkDir: workdir,
 		Timeout: timeoutSec,
 	}
+	req.Meta = traceMetadata(ctx)
 
 	toolsDir := "/ipc/tools"
 	reqPath := filepath.Join(toolsDir, fmt.Sprintf("exec-request-%s.json", id))

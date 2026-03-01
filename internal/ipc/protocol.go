@@ -54,12 +54,13 @@ type SpawnRequest struct {
 
 // ExecRequest is written to /ipc/tools/exec-request-*.json for sandbox execution.
 type ExecRequest struct {
-	ID      string   `json:"id"`
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	WorkDir string   `json:"workDir,omitempty"`
-	Timeout int      `json:"timeout,omitempty"` // seconds
-	Stdin   string   `json:"stdin,omitempty"`
+	ID      string            `json:"id"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	WorkDir string            `json:"workDir,omitempty"`
+	Timeout int               `json:"timeout,omitempty"` // seconds
+	Stdin   string            `json:"stdin,omitempty"`
+	Meta    map[string]string `json:"_meta,omitempty"`
 }
 
 // ExecResult is written to /ipc/tools/exec-result-*.json with execution results.

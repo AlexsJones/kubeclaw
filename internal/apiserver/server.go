@@ -2,12 +2,16 @@
 package apiserver
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,8 +93,12 @@ func (s *Server) buildMux(frontendFS fs.FS, token string) http.Handler {
 	// Run endpoints
 	mux.HandleFunc("GET /api/v1/runs", s.listRuns)
 	mux.HandleFunc("GET /api/v1/runs/{name}", s.getRun)
+	mux.HandleFunc("GET /api/v1/runs/{name}/telemetry", s.getRunTelemetry)
 	mux.HandleFunc("POST /api/v1/runs", s.createRun)
 	mux.HandleFunc("DELETE /api/v1/runs/{name}", s.deleteRun)
+
+	// Observability endpoints
+	mux.HandleFunc("GET /api/v1/observability/metrics", s.getObservabilityMetrics)
 
 	// Policy endpoints
 	mux.HandleFunc("GET /api/v1/policies", s.listPolicies)
@@ -470,6 +478,588 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, run)
+}
+
+type RunTraceEvent struct {
+	Time    string         `json:"time,omitempty"`
+	Level   string         `json:"level,omitempty"`
+	Message string         `json:"message,omitempty"`
+	TraceID string         `json:"traceId,omitempty"`
+	SpanID  string         `json:"spanId,omitempty"`
+	Fields  map[string]any `json:"fields,omitempty"`
+}
+
+type RunTelemetryResponse struct {
+	RunName         string          `json:"runName"`
+	Namespace       string          `json:"namespace"`
+	PodName         string          `json:"podName,omitempty"`
+	Phase           string          `json:"phase,omitempty"`
+	TraceIDs        []string        `json:"traceIds,omitempty"`
+	Events          []RunTraceEvent `json:"events,omitempty"`
+	SpanNames       []string        `json:"spanNames,omitempty"`
+	MetricNames     []string        `json:"metricNames,omitempty"`
+	CollectorSample []string        `json:"collectorSample,omitempty"`
+}
+
+type MetricBreakdown struct {
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+}
+
+type ObservabilityMetricsResponse struct {
+	CollectorReachable bool                 `json:"collectorReachable"`
+	CollectorError     string               `json:"collectorError,omitempty"`
+	CollectedAt        string               `json:"collectedAt"`
+	Namespace          string               `json:"namespace"`
+	AgentRunsTotal     float64              `json:"agentRunsTotal"`
+	InputTokensTotal   float64              `json:"inputTokensTotal"`
+	OutputTokensTotal  float64              `json:"outputTokensTotal"`
+	ToolInvocations    float64              `json:"toolInvocations"`
+	RunStatus          map[string]float64   `json:"runStatus,omitempty"`
+	InputByModel       []MetricBreakdown    `json:"inputByModel,omitempty"`
+	OutputByModel      []MetricBreakdown    `json:"outputByModel,omitempty"`
+	ToolsByName        []MetricBreakdown    `json:"toolsByName,omitempty"`
+	RawMetricNames     []string             `json:"rawMetricNames,omitempty"`
+	Samples            map[string][]float64 `json:"samples,omitempty"`
+}
+
+func (s *Server) getRunTelemetry(w http.ResponseWriter, r *http.Request) {
+	if s.kube == nil {
+		http.Error(w, "telemetry unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	name := r.PathValue("name")
+	ns := r.URL.Query().Get("namespace")
+	if ns == "" {
+		ns = "default"
+	}
+
+	var run sympoziumv1alpha1.AgentRun
+	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name, Namespace: ns}, &run); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	resp := RunTelemetryResponse{
+		RunName:   name,
+		Namespace: ns,
+		PodName:   run.Status.PodName,
+		Phase:     string(run.Status.Phase),
+	}
+
+	// Parse agent logs for structured trace events.
+	if run.Status.PodName != "" {
+		tail := int64(2000)
+		req := s.kube.CoreV1().Pods(ns).GetLogs(run.Status.PodName, &corev1.PodLogOptions{
+			Container: "agent",
+			TailLines: &tail,
+		})
+		if raw, err := req.Do(r.Context()).Raw(); err == nil {
+			resp.Events, resp.TraceIDs = parseTraceEventsFromAgentLogs(string(raw))
+		}
+	}
+
+	// Scan collector logs for span/metric names tied to this run ID.
+	if lines, err := s.readCollectorLogs(r.Context(), 4000); err == nil {
+		spanNames, metricNames, sample := parseCollectorRunEvidence(lines, name)
+		resp.SpanNames = spanNames
+		resp.MetricNames = metricNames
+		resp.CollectorSample = sample
+	}
+
+	// Fallback: expose useful timeline/usage details even when pods are gone
+	// (cleanup=delete) and log-based trace extraction isn't possible.
+	if len(resp.Events) == 0 {
+		if run.Status.StartedAt != nil {
+			resp.Events = append(resp.Events, RunTraceEvent{
+				Time:    run.Status.StartedAt.UTC().Format(time.RFC3339),
+				Level:   "info",
+				Message: "agent run started",
+			})
+		}
+		if run.Status.CompletedAt != nil {
+			resp.Events = append(resp.Events, RunTraceEvent{
+				Time:    run.Status.CompletedAt.UTC().Format(time.RFC3339),
+				Level:   "info",
+				Message: "agent run completed",
+			})
+		}
+		if run.Status.TokenUsage != nil {
+			resp.Events = append(resp.Events, RunTraceEvent{
+				Level:   "info",
+				Message: "token usage captured",
+				Fields: map[string]any{
+					"input_tokens":  run.Status.TokenUsage.InputTokens,
+					"output_tokens": run.Status.TokenUsage.OutputTokens,
+					"total_tokens":  run.Status.TokenUsage.TotalTokens,
+					"tool_calls":    run.Status.TokenUsage.ToolCalls,
+					"duration_ms":   run.Status.TokenUsage.DurationMs,
+				},
+			})
+			if len(resp.MetricNames) == 0 {
+				resp.MetricNames = []string{
+					"gen_ai.usage.input_tokens",
+					"gen_ai.usage.output_tokens",
+					"sympozium.agent.run.duration",
+					"sympozium.tool.invocations",
+				}
+			}
+		}
+		if run.Status.Error != "" {
+			resp.Events = append(resp.Events, RunTraceEvent{
+				Level:   "error",
+				Message: "run error",
+				Fields: map[string]any{
+					"error": truncateForSample(run.Status.Error, 512),
+				},
+			})
+		}
+	}
+
+	writeJSON(w, resp)
+}
+
+func (s *Server) getObservabilityMetrics(w http.ResponseWriter, r *http.Request) {
+	resp := ObservabilityMetricsResponse{
+		CollectedAt: time.Now().UTC().Format(time.RFC3339),
+		Namespace:   r.URL.Query().Get("namespace"),
+		RunStatus:   map[string]float64{},
+		Samples:     map[string][]float64{},
+	}
+	if resp.Namespace == "" {
+		resp.Namespace = "default"
+	}
+	if s.kube == nil {
+		resp.CollectorError = "kubernetes client unavailable"
+		writeJSON(w, resp)
+		return
+	}
+
+	raw, err := s.readCollectorMetrics(r.Context())
+	if err != nil {
+		resp.CollectorError = err.Error()
+		s.fillObservabilityFromRuns(r.Context(), resp.Namespace, &resp)
+		writeJSON(w, resp)
+		return
+	}
+	resp.CollectorReachable = true
+
+	samples := parsePrometheusSamples(raw)
+	metricNames := map[string]struct{}{}
+	inputByModel := map[string]float64{}
+	outputByModel := map[string]float64{}
+	toolsByName := map[string]float64{}
+
+	for i := range samples {
+		sample := samples[i]
+		metricNames[sample.Name] = struct{}{}
+		switch sample.Name {
+		case "sympozium_agent_runs_total":
+			resp.AgentRunsTotal += sample.Value
+			status := sample.Labels["status"]
+			if status != "" {
+				resp.RunStatus[status] += sample.Value
+			}
+			resp.Samples[sample.Name] = append(resp.Samples[sample.Name], sample.Value)
+		case "gen_ai_usage_input_tokens_total":
+			resp.InputTokensTotal += sample.Value
+			model := sample.Labels["model"]
+			if model != "" {
+				inputByModel[model] += sample.Value
+			}
+			resp.Samples[sample.Name] = append(resp.Samples[sample.Name], sample.Value)
+		case "gen_ai_usage_output_tokens_total":
+			resp.OutputTokensTotal += sample.Value
+			model := sample.Labels["model"]
+			if model != "" {
+				outputByModel[model] += sample.Value
+			}
+			resp.Samples[sample.Name] = append(resp.Samples[sample.Name], sample.Value)
+		case "sympozium_tool_invocations_total":
+			resp.ToolInvocations += sample.Value
+			tool := sample.Labels["tool_name"]
+			if tool == "" {
+				tool = "unknown"
+			}
+			toolsByName[tool] += sample.Value
+			resp.Samples[sample.Name] = append(resp.Samples[sample.Name], sample.Value)
+		}
+	}
+
+	resp.InputByModel = mapToMetricBreakdown(inputByModel)
+	resp.OutputByModel = mapToMetricBreakdown(outputByModel)
+	resp.ToolsByName = mapToMetricBreakdown(toolsByName)
+	resp.RawMetricNames = sortedKeys(metricNames)
+	if resp.AgentRunsTotal == 0 && resp.InputTokensTotal == 0 && resp.OutputTokensTotal == 0 {
+		s.fillObservabilityFromRuns(r.Context(), resp.Namespace, &resp)
+	}
+	writeJSON(w, resp)
+}
+
+func (s *Server) fillObservabilityFromRuns(ctx context.Context, namespace string, resp *ObservabilityMetricsResponse) {
+	if resp == nil {
+		return
+	}
+	var list sympoziumv1alpha1.AgentRunList
+	if err := s.client.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		return
+	}
+
+	inputByModel := map[string]float64{}
+	outputByModel := map[string]float64{}
+	if resp.RunStatus == nil {
+		resp.RunStatus = map[string]float64{}
+	}
+
+	for i := range list.Items {
+		run := list.Items[i]
+		resp.AgentRunsTotal++
+		phase := strings.TrimSpace(strings.ToLower(string(run.Status.Phase)))
+		if phase == "" {
+			phase = "unknown"
+		}
+		resp.RunStatus[phase]++
+
+		model := strings.TrimSpace(run.Spec.Model.Model)
+		if model == "" {
+			model = "unknown"
+		}
+		if run.Status.TokenUsage != nil {
+			in := float64(run.Status.TokenUsage.InputTokens)
+			out := float64(run.Status.TokenUsage.OutputTokens)
+			tools := float64(run.Status.TokenUsage.ToolCalls)
+			resp.InputTokensTotal += in
+			resp.OutputTokensTotal += out
+			resp.ToolInvocations += tools
+			inputByModel[model] += in
+			outputByModel[model] += out
+		}
+	}
+
+	if len(resp.InputByModel) == 0 {
+		resp.InputByModel = mapToMetricBreakdown(inputByModel)
+	}
+	if len(resp.OutputByModel) == 0 {
+		resp.OutputByModel = mapToMetricBreakdown(outputByModel)
+	}
+}
+
+func (s *Server) readCollectorMetrics(ctx context.Context) (string, error) {
+	if s.kube == nil {
+		return "", fmt.Errorf("kubernetes client unavailable")
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"http://sympozium-otel-collector.sympozium-system.svc:8889/metrics",
+		nil,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create collector metrics request: %w", err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to query collector metrics: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return "", fmt.Errorf("collector metrics request failed: HTTP %d", res.StatusCode)
+	}
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read collector metrics body: %w", err)
+	}
+	return string(raw), nil
+}
+
+func (s *Server) readCollectorLogs(ctx context.Context, maxLines int) ([]string, error) {
+	if s.kube == nil {
+		return nil, fmt.Errorf("kubernetes client unavailable")
+	}
+
+	pods, err := s.kube.CoreV1().Pods("sympozium-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=sympozium-otel-collector",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list collector pods: %w", err)
+	}
+	if len(pods.Items) == 0 {
+		return nil, fmt.Errorf("collector pod not found")
+	}
+
+	sort.Slice(pods.Items, func(i, j int) bool {
+		return pods.Items[i].CreationTimestamp.After(pods.Items[j].CreationTimestamp.Time)
+	})
+	pod := pods.Items[0]
+
+	tail := int64(maxLines)
+	if tail <= 0 {
+		tail = 2000
+	}
+	req := s.kube.CoreV1().Pods("sympozium-system").GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: "otel-collector",
+		TailLines: &tail,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream collector logs: %w", err)
+	}
+	defer stream.Close()
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed reading collector logs: %w", err)
+	}
+	lines := []string{}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
+func parseTraceEventsFromAgentLogs(raw string) ([]RunTraceEvent, []string) {
+	events := []RunTraceEvent{}
+	traceIDs := map[string]struct{}{}
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if idx := strings.Index(line, "{"); idx >= 0 {
+			line = line[idx:]
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			continue
+		}
+
+		ev := RunTraceEvent{
+			Time:    lookupString(m, "time", "timestamp", "ts"),
+			Level:   lookupString(m, "level"),
+			Message: lookupString(m, "msg", "message"),
+			TraceID: lookupString(m, "trace_id", "traceId", "traceid"),
+			SpanID:  lookupString(m, "span_id", "spanId", "spanid"),
+			Fields:  map[string]any{},
+		}
+		if ev.TraceID == "" && ev.SpanID == "" {
+			continue
+		}
+		if ev.TraceID != "" {
+			traceIDs[ev.TraceID] = struct{}{}
+		}
+
+		for k, v := range m {
+			switch k {
+			case "time", "timestamp", "ts", "level", "msg", "message", "trace_id", "traceId", "traceid", "span_id", "spanId", "spanid":
+				continue
+			default:
+				ev.Fields[k] = v
+			}
+		}
+		if len(ev.Fields) == 0 {
+			ev.Fields = nil
+		}
+		events = append(events, ev)
+		if len(events) >= 300 {
+			break
+		}
+	}
+	return events, sortedKeys(traceIDs)
+}
+
+func parseCollectorRunEvidence(lines []string, runName string) ([]string, []string, []string) {
+	knownSpans := []string{
+		"sympozium.agent.run",
+		"gen_ai.chat",
+		"gen_ai.execute_tool",
+		"sympozium.skill.exec",
+		"mcp.tools/call",
+	}
+	knownMetrics := []string{
+		"sympozium.agent.runs",
+		"sympozium.agent.run.duration",
+		"gen_ai.usage.input_tokens",
+		"gen_ai.usage.output_tokens",
+		"sympozium.tool.invocations",
+		"sympozium.skill.duration",
+	}
+	spanSet := map[string]struct{}{}
+	metricSet := map[string]struct{}{}
+	sample := []string{}
+
+	for i := range lines {
+		line := lines[i]
+		if runName != "" && !strings.Contains(line, runName) {
+			continue
+		}
+		for _, span := range knownSpans {
+			if strings.Contains(line, span) {
+				spanSet[span] = struct{}{}
+			}
+		}
+		for _, metricName := range knownMetrics {
+			if strings.Contains(line, metricName) {
+				metricSet[metricName] = struct{}{}
+			}
+		}
+		if len(sample) < 12 {
+			sample = append(sample, truncateForSample(line, 240))
+		}
+	}
+
+	return sortedKeys(spanSet), sortedKeys(metricSet), sample
+}
+
+type promSample struct {
+	Name   string
+	Labels map[string]string
+	Value  float64
+}
+
+func parsePrometheusSamples(raw string) []promSample {
+	out := []promSample{}
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
+		name, labels := parsePromMetricSelector(fields[0])
+		out = append(out, promSample{Name: name, Labels: labels, Value: value})
+	}
+	return out
+}
+
+func parsePromMetricSelector(selector string) (string, map[string]string) {
+	start := strings.Index(selector, "{")
+	end := strings.LastIndex(selector, "}")
+	if start < 0 || end < 0 || end <= start {
+		return selector, map[string]string{}
+	}
+	name := selector[:start]
+	return name, parsePromLabels(selector[start+1 : end])
+}
+
+func parsePromLabels(raw string) map[string]string {
+	out := map[string]string{}
+	for _, part := range splitCommaRespectQuotes(raw) {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(kv[0])
+		v := strings.TrimSpace(kv[1])
+		v = strings.Trim(v, "\"")
+		v = strings.ReplaceAll(v, `\"`, `"`)
+		if k != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func splitCommaRespectQuotes(s string) []string {
+	parts := []string{}
+	var b strings.Builder
+	inQuotes := false
+	escaped := false
+	for _, r := range s {
+		switch {
+		case escaped:
+			b.WriteRune(r)
+			escaped = false
+		case r == '\\':
+			b.WriteRune(r)
+			escaped = true
+		case r == '"':
+			b.WriteRune(r)
+			inQuotes = !inQuotes
+		case r == ',' && !inQuotes:
+			part := strings.TrimSpace(b.String())
+			if part != "" {
+				parts = append(parts, part)
+			}
+			b.Reset()
+		default:
+			b.WriteRune(r)
+		}
+	}
+	last := strings.TrimSpace(b.String())
+	if last != "" {
+		parts = append(parts, last)
+	}
+	return parts
+}
+
+func lookupString(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		v, ok := m[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			if strings.TrimSpace(t) != "" {
+				return t
+			}
+		default:
+			s := fmt.Sprintf("%v", t)
+			if strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func mapToMetricBreakdown(m map[string]float64) []MetricBreakdown {
+	out := make([]MetricBreakdown, 0, len(m))
+	for k, v := range m {
+		out = append(out, MetricBreakdown{Label: k, Value: v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Value == out[j].Value {
+			return out[i].Label < out[j].Label
+		}
+		return out[i].Value > out[j].Value
+	})
+	return out
+}
+
+func sortedKeys[T any](m map[string]T) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func truncateForSample(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
 
 // CreateRunRequest is the request body for creating a new AgentRun.

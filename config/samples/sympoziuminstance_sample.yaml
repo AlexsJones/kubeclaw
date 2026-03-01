@@ -35,3 +35,11 @@ spec:
       secretName: alice-github-token
     - provider: openai
       secretName: alice-openai-key
+  observability:
+    enabled: true
+    otlpEndpoint: otel-collector.observability.svc:4317
+    otlpProtocol: grpc
+    serviceName: sympozium
+    resourceAttributes:
+      deployment.environment: production
+      k8s.cluster.name: my-cluster

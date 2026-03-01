@@ -142,12 +142,23 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 	// Look up the SympoziumInstance to check for memory configuration.
 	instance := &sympoziumv1alpha1.SympoziumInstance{}
 	memoryEnabled := false
+	var observability *sympoziumv1alpha1.ObservabilitySpec
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: agentRun.Namespace,
 		Name:      agentRun.Spec.InstanceRef,
 	}, instance); err == nil {
 		if instance.Spec.Memory != nil && instance.Spec.Memory.Enabled {
 			memoryEnabled = true
+		}
+		if instance.Spec.Observability != nil && instance.Spec.Observability.Enabled {
+			obsCopy := *instance.Spec.Observability
+			if len(instance.Spec.Observability.ResourceAttributes) > 0 {
+				obsCopy.ResourceAttributes = make(map[string]string, len(instance.Spec.Observability.ResourceAttributes))
+				for k, v := range instance.Spec.Observability.ResourceAttributes {
+					obsCopy.ResourceAttributes[k] = v
+				}
+			}
+			observability = &obsCopy
 		}
 		// If the AgentRun has no skills, inherit from the SympoziumInstance.
 		// This is a safety net — tuiCreateRun and the schedule controller
@@ -172,7 +183,7 @@ func (r *AgentRunReconciler) reconcilePending(ctx context.Context, log logr.Logg
 	}
 
 	// Build and create the Job
-	job := r.buildJob(agentRun, memoryEnabled, sidecars)
+	job := r.buildJob(agentRun, memoryEnabled, observability, sidecars)
 	if err := controllerutil.SetControllerReference(agentRun, job, r.Scheme); err != nil {
 		return ctrl.Result{}, fmt.Errorf("setting owner reference: %w", err)
 	}
@@ -518,7 +529,12 @@ func (r *AgentRunReconciler) ensureAgentServiceAccount(ctx context.Context, name
 }
 
 // buildJob constructs the Kubernetes Job for an AgentRun.
-func (r *AgentRunReconciler) buildJob(agentRun *sympoziumv1alpha1.AgentRun, memoryEnabled bool, sidecars []resolvedSidecar) *batchv1.Job {
+func (r *AgentRunReconciler) buildJob(
+	agentRun *sympoziumv1alpha1.AgentRun,
+	memoryEnabled bool,
+	observability *sympoziumv1alpha1.ObservabilitySpec,
+	sidecars []resolvedSidecar,
+) *batchv1.Job {
 	labels := map[string]string{
 		"sympozium.ai/agent-run": agentRun.Name,
 		"sympozium.ai/instance":  agentRun.Spec.InstanceRef,
@@ -533,7 +549,7 @@ func (r *AgentRunReconciler) buildJob(agentRun *sympoziumv1alpha1.AgentRun, memo
 	backoffLimit := int32(0)
 
 	// Build containers
-	containers := r.buildContainers(agentRun, memoryEnabled, sidecars)
+	containers := r.buildContainers(agentRun, memoryEnabled, observability, sidecars)
 	volumes := r.buildVolumes(agentRun, memoryEnabled)
 
 	runAsNonRoot := true
@@ -571,7 +587,12 @@ func (r *AgentRunReconciler) buildJob(agentRun *sympoziumv1alpha1.AgentRun, memo
 }
 
 // buildContainers constructs the container list for an agent pod.
-func (r *AgentRunReconciler) buildContainers(agentRun *sympoziumv1alpha1.AgentRun, memoryEnabled bool, sidecars []resolvedSidecar) []corev1.Container {
+func (r *AgentRunReconciler) buildContainers(
+	agentRun *sympoziumv1alpha1.AgentRun,
+	memoryEnabled bool,
+	observability *sympoziumv1alpha1.ObservabilitySpec,
+	sidecars []resolvedSidecar,
+) []corev1.Container {
 	readOnly := true
 	noPrivEsc := false
 
@@ -592,6 +613,8 @@ func (r *AgentRunReconciler) buildContainers(agentRun *sympoziumv1alpha1.AgentRu
 				{Name: "AGENT_RUN_ID", Value: agentRun.Name},
 				{Name: "AGENT_ID", Value: agentRun.Spec.AgentID},
 				{Name: "SESSION_KEY", Value: agentRun.Spec.SessionKey},
+				{Name: "INSTANCE_NAME", Value: agentRun.Spec.InstanceRef},
+				{Name: "AGENT_NAMESPACE", Value: agentRun.Namespace},
 				{Name: "TASK", Value: agentRun.Spec.Task},
 				{Name: "SYSTEM_PROMPT", Value: agentRun.Spec.SystemPrompt},
 				{Name: "MODEL_PROVIDER", Value: agentRun.Spec.Model.Provider},
@@ -624,6 +647,7 @@ func (r *AgentRunReconciler) buildContainers(agentRun *sympoziumv1alpha1.AgentRu
 			Env: []corev1.EnvVar{
 				{Name: "AGENT_RUN_ID", Value: agentRun.Name},
 				{Name: "INSTANCE_NAME", Value: agentRun.Spec.InstanceRef},
+				{Name: "AGENT_NAMESPACE", Value: agentRun.Namespace},
 				{Name: "EVENT_BUS_URL", Value: "nats://nats.sympozium-system.svc:4222"},
 			},
 			VolumeMounts: []corev1.VolumeMount{
@@ -721,6 +745,12 @@ func (r *AgentRunReconciler) buildContainers(agentRun *sympoziumv1alpha1.AgentRu
 		)
 	}
 
+	// Inject per-instance OpenTelemetry configuration.
+	if observability != nil && observability.Enabled {
+		containers[0].Env = append(containers[0].Env, buildObservabilityEnv(agentRun, observability)...)
+		containers[1].Env = append(containers[1].Env, buildObservabilityEnv(agentRun, observability)...)
+	}
+
 	// Inject skill sidecar containers.
 	for _, sc := range sidecars {
 		cmd := sc.sidecar.Command
@@ -775,6 +805,57 @@ func (r *AgentRunReconciler) buildContainers(agentRun *sympoziumv1alpha1.AgentRu
 	}
 
 	return containers
+}
+
+func buildObservabilityEnv(agentRun *sympoziumv1alpha1.AgentRun, obs *sympoziumv1alpha1.ObservabilitySpec) []corev1.EnvVar {
+	env := []corev1.EnvVar{
+		{Name: "SYMPOZIUM_OTEL_ENABLED", Value: "true"},
+	}
+
+	if obs.OTLPEndpoint != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "SYMPOZIUM_OTEL_OTLP_ENDPOINT", Value: obs.OTLPEndpoint},
+			corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: obs.OTLPEndpoint},
+		)
+	}
+	if obs.OTLPProtocol != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "SYMPOZIUM_OTEL_OTLP_PROTOCOL", Value: obs.OTLPProtocol},
+			corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_PROTOCOL", Value: obs.OTLPProtocol},
+		)
+	}
+	if obs.ServiceName != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "SYMPOZIUM_OTEL_SERVICE_NAME", Value: obs.ServiceName},
+			corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: obs.ServiceName},
+		)
+	}
+
+	attrs := map[string]string{
+		"sympozium.instance.name": agentRun.Spec.InstanceRef,
+		"sympozium.agent_run.id":  agentRun.Name,
+		"k8s.namespace.name":      agentRun.Namespace,
+	}
+	for k, v := range obs.ResourceAttributes {
+		attrs[k] = v
+	}
+	var pairs []string
+	for k, v := range attrs {
+		if k == "" || v == "" {
+			continue
+		}
+		pairs = append(pairs, fmt.Sprintf("%s=%s", k, v))
+	}
+	sort.Strings(pairs)
+	if len(pairs) > 0 {
+		resourceAttrs := strings.Join(pairs, ",")
+		env = append(env,
+			corev1.EnvVar{Name: "SYMPOZIUM_OTEL_RESOURCE_ATTRIBUTES", Value: resourceAttrs},
+			corev1.EnvVar{Name: "OTEL_RESOURCE_ATTRIBUTES", Value: resourceAttrs},
+		)
+	}
+
+	return env
 }
 
 // buildVolumes constructs the volume list for an agent pod.

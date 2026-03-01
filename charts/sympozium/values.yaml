@@ -156,3 +156,31 @@ serviceMonitor:
   enabled: false
   interval: 30s
   labels: {}
+
+# -- Built-in OpenTelemetry collector (enabled by default)
+observability:
+  enabled: true
+  collector:
+    image:
+      repository: otel/opentelemetry-collector
+      tag: "0.104.0"
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    service:
+      otlpGrpcPort: 4317
+      otlpHttpPort: 4318
+      metricsPort: 8889
+      healthPort: 13133
+  defaultInstance:
+    enabled: true
+    otlpEndpoint: "sympozium-otel-collector.sympozium-system.svc:4317"
+    otlpProtocol: "grpc"
+    serviceName: "sympozium"
+    resourceAttributes:
+      deployment.environment: "cluster"
+      k8s.cluster.name: "unknown"
